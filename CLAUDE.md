@@ -128,6 +128,9 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
   - `multiply_rate(a, rate)` is that same value rounded half-up once. Use it for **one cash
     flow**, never inside a solver.
 - **The one rounding rule** is written once, in `money.round_half_up_whole(n, d)`.
+  **One deliberate exception: goal-seeking.** A solved savings contribution must *reach* the goal,
+  so it rounds **up**, with `money.round_ceiling` on `tvm.pmt_exact`. Solved periods round up too.
+  Use the ceiling nowhere else.
   `money.round_half_up` validates its inputs and then delegates to it. Use the unchecked
   `_whole` form only in hot loops whose operands are ints already validated upstream
   (amortization). Anywhere else, use the checked form.
@@ -282,9 +285,12 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
   - `n`: the time to reach a target. This is `tvm.n`'s `periods`, the first whole month the
     balance reaches the target. The last row stops at that month.
   Inputs a mode doesn't use are ignored.
-- A solved contribution is rounded **half-up** like every payment, so the final balance can land
-  a few cents either side of the target. $1,000,000 in 30 years at 7% needs $753.16, which lands at
-  $999,998.33. The screen shows the actual final balance.
+- **Solved contributions round up so the goal is reached; solved periods round up for the same
+  reason** (decided after M6). $1,000,000 in 30 years at 7% is exactly 753.1614…/month: half-up
+  would give 753.16 and land $1.67 short. Rounded up, 753.17 lands at $1,000,010.53, and the screen
+  shows the margin ("reaches the target with 10.53 to spare").
+- Time to goal also checks the reported month really reaches the target. `tvm.n`'s `periods`
+  ignores a sub-1e-4 overshoot, so the façade adds a month if needed.
 - Contributions are made at the **end of each month** (an ordinary annuity), matching the loan
   payment convention. **Start-of-month is deliberately not offered in v1.**
 - Monthly rate = annual / 12, kept exact. Each year's balance is `tvm.fv`, rounded half-up to the

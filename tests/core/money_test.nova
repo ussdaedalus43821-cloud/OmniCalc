@@ -1,5 +1,5 @@
 # module: money
-# expect: 41
+# expect: 47
 #
 # Golden values for src/core/money.nova. Every expected value is a hand-checked
 # exact integer.
@@ -90,5 +90,14 @@ for pair in pairs {
 }
 t.check("round_half_up_whole agrees with round_half_up", mismatches.count, 0)
 t.check("round_half_up_whole: one month at 6.5% on 200,000.00", money.round_half_up_whole(1300000000000, 12000000), 108333)
+
+# ---- added in M7 prep: round_ceiling, the goal-seeking exception ----
+t.check("round_ceiling: 7/3 -> 3", money.round_ceiling(7, 3), 3)
+t.check("round_ceiling: exact stays", money.round_ceiling(6, 3), 2)
+t.check("round_ceiling: -7/3 -> -2 (toward +infinity)", money.round_ceiling(-7, 3), -2)
+t.check("round_ceiling: negative denominator", money.round_ceiling(7, -3), -2)
+t.check("round_ceiling: 1/1000000 -> 1", money.round_ceiling(1, 1000000), 1)
+def ceiling_zero() { money.round_ceiling(1, 0) }
+t.check_throws("round_ceiling: zero denominator", ceiling_zero, "must not be zero")
 
 t.finish()

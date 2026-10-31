@@ -44,7 +44,8 @@ BUDGET_MS = 100
 # "summary" items are (result key, label, kind); kinds: "money" (an int at
 # the result's scale), "count", "percent" ({value, scale}), "text", and
 # "phrase" ({before, amount, after}: words around a money amount, so the
-# facade decides how a number reads - "saves X" vs "costs X more"). The
+# facade decides how a number reads - "saves X" vs "costs X more"; amount
+# may be absent, e.g. "no target in this mode"). The
 # table and CSV come from the result's columns / column_kinds / rows.
 SCREENS = [
     {
@@ -81,6 +82,7 @@ SCREENS = [
             ("future_value", "Final balance", "money"),
             ("monthly_contribution", "Monthly contribution", "money"),
             ("time", "Time", "text"),
+            ("goal", "Goal", "phrase"),
             ("total_contributed", "Total contributed", "money"),
             ("total_interest", "Total interest", "money"),
         ],
@@ -184,6 +186,8 @@ def format_value(value, kind, scale, grouping=True):
     if kind == "percent":
         return format_minor(value["value"], value["scale"], grouping) + "%"
     if kind == "phrase":
+        if "amount" not in value:
+            return "".join([value["before"], value["after"]])
         return "".join([value["before"], format_minor(value["amount"], scale, grouping), value["after"]])
     return str(value)
 

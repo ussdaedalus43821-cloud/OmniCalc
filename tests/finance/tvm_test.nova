@@ -1,5 +1,5 @@
 # module: tvm
-# expect: 49
+# expect: 51
 #
 # Reference values come from tests/finance/gen_tvm_vectors.py: an independent
 # Python decimal (80-digit) implementation of the textbook closed forms, with
@@ -128,5 +128,10 @@ let two_root = tvm.rate(usd(-10000), usd(-36200), usd(23000), 2)
 t.check_true("two roots: returns 10% (within 1e-9)", rates_within(two_root, rates.annual(100000), 9))
 t.check("two roots: 20% is also a root", tvm.fv(usd(-10000), usd(23000), 2, rates.annual(200000)), usd(-36200))
 t.check("two roots: 10% reproduces the cash flows", tvm.fv(usd(-10000), usd(23000), 2, rates.annual(100000)), usd(-36200))
+
+# ---- added in M7 prep: pmt_exact, the unrounded payment ----
+let exact_payment = tvm.pmt_exact(loan, ZERO, 360, monthly_65)
+t.check("pmt_exact rounds half-up to pmt", money.round_half_up(exact_payment.num, exact_payment.den), -126414)
+t.check("pmt_exact at a zero rate", tvm.pmt_exact(usd(100000), ZERO, 3, zero_rate), {num: -100000, den: 3, scale: 2, currency: "USD"})
 
 t.finish()

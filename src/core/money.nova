@@ -124,6 +124,23 @@ export def round_half_up_whole(numerator, denominator) {
     return 0 - ((2 * (0 - n) + d) // (2 * d))
 }
 
+# numerator / denominator rounded UP (toward +infinity) to a whole number.
+# The one deliberate exception to half-up rounding (CLAUDE.md "Number
+# rules"): goal-seeking. A solved savings contribution must REACH the goal,
+# so it rounds up; half-up could land a cent short. Use nowhere else.
+export def round_ceiling(numerator, denominator) {
+    let n = require_whole(numerator, "numerator")
+    let d = require_whole(denominator, "denominator")
+    if d == 0 {
+        throw("money: round_ceiling denominator must not be zero")
+    }
+    if d < 0 {
+        n = 0 - n
+        d = 0 - d
+    }
+    return 0 - ((0 - n) // d)
+}
+
 # a * rate with no rounding: {num, den, scale, currency}, meaning num / den
 # minor units. Both operands are integers, so this is exact. Solvers
 # evaluate residuals in this form, never in rounded minor units.

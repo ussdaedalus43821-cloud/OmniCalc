@@ -192,6 +192,16 @@ These were checked against the budget and stay in NovaLang. Re-measure if inputs
   37.2 / 8.7 ms for amortization / savings / refinance / debt payoff. CI runners are about 40%
   faster than this container.
 
+### Debt payoff with 10+ debts — observed, not yet a problem (2026-10-31)
+- **Observed:** about 45 µs per debt-month per strategy, and the screen runs both strategies. A
+  10-debt, 166-month stress case is about 75 ms per strategy, so about 150 ms for the screen.
+  Households with 3–6 debts take milliseconds.
+- **Why not now:** 10+ debts is the edge, not the typical case. Comparing strategies is a
+  deliberate press of Calculate, not a keystroke path.
+- **Trigger:** if realistic usage exceeds **8 debts**, apply the unchecked-core pattern to
+  `payoff_plan`'s inner loop. First, skip paid-off debts by keeping an open-index list. Re-measure
+  before and after.
+
 ## Known approximations
 
 Behavior that is deliberately not exact.

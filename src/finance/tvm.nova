@@ -120,14 +120,23 @@ def pv_minor(fv, pmt, n, rate) {
     return money.round_half_up(0 - (fv * b * rate.num + pmt * (a - b) * d), a * rate.num)
 }
 
-def pmt_minor(pv, fv, n, rate) {
+# The exact payment as [numerator, denominator] minor units (denominator > 0).
+def pmt_fraction(pv, fv, n, rate) {
     if rate.num == 0 {
-        return money.round_half_up(0 - (pv + fv), n)
+        return [0 - (pv + fv), n]
     }
     let d = rate.den * MICRO
     let a = pow(d + rate.num, n)
     let b = pow(d, n)
-    return money.round_half_up(0 - (pv * a + fv * b) * rate.num, (a - b) * d)
+    if a > b {
+        return [0 - (pv * a + fv * b) * rate.num, (a - b) * d]
+    }
+    return [(pv * a + fv * b) * rate.num, (b - a) * d]
+}
+
+def pmt_minor(pv, fv, n, rate) {
+    let f = pmt_fraction(pv, fv, n, rate)
+    return money.round_half_up(f[0], f[1])
 }
 
 # Sign of the residual pv*(1+r)^n + pmt*((1+r)^n - 1)/r + fv, evaluated
@@ -227,6 +236,15 @@ export def pv(fv, pmt, n, rate) {
 export def pmt(pv, fv, n, rate) {
     let unit = same_unit([pv, fv])
     return result(unit, pmt_minor(pv.minor, fv.minor, require_periods(n, 1), require_rate(rate)))
+}
+
+# The same payment as pmt(), unrounded: {num, den, scale, currency} meaning
+# num / den minor units. For callers that need a different rounding
+# direction - e.g. a savings goal, which rounds the contribution UP.
+export def pmt_exact(pv, fv, n, rate) {
+    let unit = same_unit([pv, fv])
+    let f = pmt_fraction(pv.minor, fv.minor, require_periods(n, 1), require_rate(rate))
+    return {num: f[0], den: f[1], scale: unit.scale, currency: unit.currency}
 }
 
 # Returns {exact, periods}. `exact` is the real-valued solution (a float)
