@@ -47,8 +47,17 @@ def calibration_workload() {
 """
 
 
-def measure(screen, runs):
-    inputs = app.default_inputs(screen)
+# Heavier scenarios beyond each screen's defaults: (name, screen, inputs).
+# The 20-position portfolio is the investments screen's expensive case (M7).
+def extra_scenarios():
+    import json
+    with open(os.path.join(REPO_ROOT, "tests", "app", "vectors", "portfolio_20.json"), encoding="utf-8") as handle:
+        vector = json.load(handle)
+    return [("investments_20", "investments", [vector["rows"], vector["as_of"]])]
+
+
+def measure(screen, runs, inputs=None):
+    inputs = inputs if inputs is not None else app.default_inputs(screen)
     app.calculate(screen, *inputs)
     timings = []
     for _ in range(runs):
@@ -82,6 +91,8 @@ def main(argv):
 
     calibration_ms = calibrate(options.runs)
     screens = {screen: measure(screen, options.runs) for screen in app.SCREEN_KEYS}
+    for name, screen, inputs in extra_scenarios():
+        screens[name] = measure(screen, options.runs, inputs)
     for numbers in screens.values():
         numbers["relative"] = round(numbers["median_ms"] / calibration_ms, 3)
     results = {"python": platform.python_version(), "machine": platform.machine(),

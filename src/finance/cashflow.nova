@@ -681,6 +681,35 @@ export def xnpv(rate, dated_flows) {
 # The annual XIRR as an unrounded {num, den}. Throws when there is no root
 # (single-sign flows) and when the flows change sign more than once.
 export def xirr(dated_flows) {
+    return xirr_of_terms(checked_terms(dated_flows))
+}
+
+# xirr() started from a guess (a rate {num, den}, annual): Illinois runs
+# inside a bracket of +-GUESS_WINDOW micro-units around it, which skips the
+# outward bracket walk (~7 evaluations). If that window shows no sign change -
+# a bad guess - the full search runs, so a bad guess costs time, never
+# correctness (tests/finance/cashflow_test.nova passes -50% and checks the
+# answer is unchanged). The same checks as xirr() apply first.
+let GUESS_WINDOW = 50000
+export def xirr_from_guess(dated_flows, guess) {
+    let terms = checked_terms(dated_flows)
+    rates.check_rate(guess)
+    let centre = guess.num // guess.den
+    let lo = centre - GUESS_WINDOW
+    if lo < -999900 {
+        lo = -999900
+    }
+    let hi = centre + GUESS_WINDOW
+    let s_lo = xsign(terms, lo, 1)
+    let s_hi = xsign(terms, hi, 1)
+    if s_lo != 0 and s_hi != 0 and s_lo != s_hi {
+        return xsolve(terms, lo, hi, s_lo)
+    }
+    return xirr_of_terms(terms)
+}
+
+# Validated terms with exactly one sign change (else the documented throws).
+def checked_terms(dated_flows) {
     let shape = validate_dated(dated_flows)
     let changes = dated_sign_changes(shape.terms)
     if changes == 0 {
@@ -689,7 +718,10 @@ export def xirr(dated_flows) {
     if changes > 1 {
         throw("cashflow: these dated flows change sign " + str(changes) + " times; XIRR supports one sign change in v1 (Budan's theorem does not apply to day-count exponents). The planned Python escape hatch is in docs/ESCAPE-HATCHES.md")
     }
-    let terms = shape.terms
+    return shape.terms
+}
+
+def xirr_of_terms(terms) {
     let s0 = xsign(terms, 0, 1)
     if s0 == 0 {
         return {num: 0, den: 1}

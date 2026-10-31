@@ -62,15 +62,30 @@ def sort_by_date(flows) {
     return sorted_flows
 }
 
-# XIRR of buying each lot at its cost and holding until as_of at `value`.
+# XIRR of buying each lot at its cost and holding until as_of at `value`,
+# started from a guess: total value / total cost annualized over first
+# purchase -> as_of (usually within a few hundred bp of the answer, and
+# computed from data in hand). With no usable guess (nothing gained or lost
+# yet, or a zero value) the full search runs.
 def money_weighted(lots, value_minor, as_of, unit) {
     let flows = []
+    let span = {cost: 0, first: as_of}
     for lot in lots {
         let cost = money.round_half_up(lot.shares.num * lot.price_per_share.minor, lot.shares.den)
+        span["cost"] = span.cost + cost
+        if lot.date_serial < span.first {
+            span["first"] = lot.date_serial
+        }
         append(flows, {date_serial: lot.date_serial, amount: money.make(0 - cost, unit.scale, unit.currency)})
     }
     append(flows, {date_serial: as_of, amount: money.make(value_minor, unit.scale, unit.currency)})
-    return cf.xirr(sort_by_date(flows))
+    let ordered = sort_by_date(flows)
+    let days = as_of - span.first
+    if days > 0 and span.cost > 0 and value_minor > 0 {
+        let guess = inv.cagr(money.make(span.cost, unit.scale, unit.currency), money.make(value_minor, unit.scale, unit.currency), {num: days, den: 365}).rate
+        return cf.xirr_from_guess(ordered, guess)
+    }
+    return cf.xirr(ordered)
 }
 
 export def calculate(rows, as_of_text) {

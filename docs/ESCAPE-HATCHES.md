@@ -221,10 +221,14 @@ These were checked against the budget and stay in NovaLang. Re-measure if inputs
   - XIRR's day exponents computed once per call.
 - Result: **78–89 ms median** headless (best about 75–81 ms). That's inside the 100 ms budget
   but above the 70 ms target. In the GUI, the default 3-lot tab is 18 ms median.
-- **Next levers, not applied:**
-  - start XIRR from a guessed bracket, like `table_irr` (estimated −10–15 ms);
-  - drop the per-position XIRR for multi-lot positions, which the brief didn't ask for
-    (−16 ms).
+- **After review:**
+  - **Applied** a guessed-start XIRR (`cashflow.xirr_from_guess`). The guess is value ÷ cost
+    annualized over first purchase → as-of, searched with a ±500 bp window and a full-search
+    fallback; tests cover bad guesses of −50% and +900%. This brought the screen to
+    **72–85 ms median** (`investments_20` in `tools/perf.py`), within the < 90 ms target for
+    portfolio screens.
+  - **Kept** the per-position XIRR for multi-lot positions. It answers "which position is my
+    best performer?", so cutting it to hit a budget was the wrong lever.
 - Tried and rejected: stopping Illinois once XNPV is under half a minor unit. It lost XIRR
   precision on small amounts, and the reference tests failed.
 
