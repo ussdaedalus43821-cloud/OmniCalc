@@ -20,12 +20,17 @@
 #   breaks_even        true if the cumulative saving ever reaches the closing costs
 #   break_even_month   the smallest month k >= 1 where it does (0 when
 #                      breaks_even is false - NovaLang has no null)
-#   total_savings      savings summed over the SHORTER schedule's months, minus
-#                      closing costs (signed money)
 #   lifetime_savings   current total paid - (new total paid + closing costs):
 #                      what the refinance saves over both loans' full lives.
-#                      When the terms differ, total_savings ignores the longer
-#                      loan's extra months; this does not.
+#                      THE HEADLINE: "should I refinance?" is a question about
+#                      total dollars over the loans' lives.
+#   savings_over_remaining_term
+#                      savings summed over the SHORTER schedule's months, minus
+#                      closing costs (signed money) - a sanity check, not the
+#                      answer: when the terms differ it ignores the longer
+#                      loan's extra months, and can even have the opposite
+#                      sign (30 -> 15 years: -63,140.28 here, +164,400.34
+#                      lifetime). Named in M6; it was total_savings.
 #   payoff_period_current, payoff_period_new, current_total_paid, new_total_paid
 # Throws when the new rate is not lower AND the new payment is not lower:
 # then nothing is saved and there is no break-even to report.
@@ -89,7 +94,7 @@ export def compare(current_principal, current_rate, current_n, current_payment, 
         monthly_savings: monthly_savings,
         breaks_even: scan.month > 0,
         break_even_month: scan.month,
-        total_savings: as_money(current_principal, scan.shorter_sum - closing_costs.minor),
+        savings_over_remaining_term: as_money(current_principal, scan.shorter_sum - closing_costs.minor),
         lifetime_savings: as_money(current_principal, current.total_paid - replacement.total_paid - closing_costs.minor),
         payoff_period_current: current.payoff_period,
         payoff_period_new: replacement.payoff_period,

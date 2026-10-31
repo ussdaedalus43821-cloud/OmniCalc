@@ -21,8 +21,10 @@ CANONICAL = ("200,000.00", "6.5", "360", "0")
 # One canonical input set per screen, as a person would type it.
 SCREEN_INPUTS = {
     "amortization": [CANONICAL, ("200000", "6.5", "360", "105.34"), ("15,000", "0", "12", "")],
-    "savings": [("10,000.00", "500", "7", "30"), ("0", "200", "0", "5")],
+    "savings": [("fv", "10,000.00", "500", "7", "30", ""), ("pmt", "10,000", "", "7", "30", "1,000,000"), ("n", "10,000", "500", "7", "", "250,000")],
     "refinance": [("200,000.00", "6.5", "360", "1,264.14", "5.0", "360", "6,000"), ("200000", "6.5", "360", "1264.14", "5", "180", "6000")],
+    "debt_payoff": [([["Medical", "1,200", "0", "50"], ["Card", "6,000", "24.99", "150"], ["Car", "9,000", "7", "250"]], "700", "avalanche"),
+                    ([["Big", "9,000", "18", "200"], ["Small", "1,500", "18", "40"]], "600", "snowball")],
 }
 # CI runners are slower and noisier than a workstation; the workflow may
 # raise this with OMNICALC_BUDGET_MS. Locally it is the real 100 ms budget.
@@ -31,7 +33,8 @@ BUDGET_MS = float(os.environ.get("OMNICALC_BUDGET_MS", app.BUDGET_MS))
 
 def cli_result(screen, *inputs):
     completed = subprocess.run(
-        [sys.executable, nova_runtime.NOVA_SCRIPT, os.path.join(REPO_ROOT, "tools", "calc_cli.nova"), screen, *inputs],
+        [sys.executable, nova_runtime.NOVA_SCRIPT, os.path.join(REPO_ROOT, "tools", "calc_cli.nova"), screen,
+         *[json.dumps(value) if isinstance(value, list) else value for value in inputs]],
         capture_output=True, text=True, check=True, cwd=REPO_ROOT,
     )
     return json.loads(completed.stdout)

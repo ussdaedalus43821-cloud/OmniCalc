@@ -1,0 +1,67 @@
+# module: debt_payoff
+# expect: 22
+#
+# Reference plans from tests/finance/gen_debt_payoff_vectors.py (a separate
+# Python implementation of CLAUDE.md "Debt payoff convention", in fractions).
+
+import "../../tools/check.nova" as t
+import "../../src/core/money.nova" as money
+import "../../src/core/rates.nova" as rates
+import "../../src/finance/debt_payoff.nova" as dp
+
+def usd(minor) {
+    return money.make(minor, 2, "USD")
+}
+def debt(name, balance, apr_micro, minimum) {
+    return {name: name, balance: usd(balance), rate: rates.per_period(rates.annual(apr_micro), 12), minimum_payment: usd(minimum)}
+}
+
+# ---- 3 debts, budget 700.00: the strategies pick different orders ----
+let three = [debt("Medical", 120000, 0, 5000), debt("Card", 600000, 249900, 15000), debt("Car", 900000, 70000, 25000)]
+let snowball = dp.payoff_plan(three, usd(70000), "snowball")
+let avalanche = dp.payoff_plan(three, usd(70000), "avalanche")
+t.check("snowball: smallest balance first", snowball.order, ["Medical", "Card", "Car"])
+t.check("avalanche: highest rate first (names and indexes)", [avalanche.order, avalanche.order_index], [["Card", "Car", "Medical"], [1, 2, 0]])
+t.check("snowball: months, total interest, total paid", [snowball.payoff_months, snowball.total_interest, snowball.total_paid], [27, usd(248564), usd(1868564)])
+t.check("avalanche: months, total interest, total paid", [avalanche.payoff_months, avalanche.total_interest, avalanche.total_paid], [27, usd(217869), usd(1837869)])
+t.check("snowball: per debt (input order)", snowball.per_debt, [{name: "Medical", paid_off_month: 4, interest_paid: usd(0)}, {name: "Card", paid_off_month: 20, interest_paid: usd(155859)}, {name: "Car", paid_off_month: 27, interest_paid: usd(92705)}])
+t.check("avalanche: per debt (input order)", avalanche.per_debt, [{name: "Medical", paid_off_month: 24, interest_paid: usd(0)}, {name: "Card", paid_off_month: 19, interest_paid: usd(126870)}, {name: "Car", paid_off_month: 27, interest_paid: usd(90999)}])
+t.check("total paid = principal + interest", money.subtract(avalanche.total_paid, avalanche.total_interest), usd(1620000))
+
+# ---- equal rates: different order, identical total interest ----
+let same_rate = [debt("Big", 900000, 180000, 20000), debt("Mid", 400000, 180000, 10000), debt("Small", 150000, 180000, 4000)]
+let same_snowball = dp.payoff_plan(same_rate, usd(60000), "snowball")
+let same_avalanche = dp.payoff_plan(same_rate, usd(60000), "avalanche")
+t.check("equal rates: snowball order", same_snowball.order, ["Small", "Mid", "Big"])
+t.check("equal rates: avalanche keeps input order on ties", same_avalanche.order, ["Big", "Mid", "Small"])
+t.check("equal rates: same total interest either way", [same_snowball.total_interest, same_avalanche.total_interest], [usd(364360), usd(364360)])
+t.check("equal rates: same payoff month", [same_snowball.payoff_months, same_avalanche.payoff_months], [31, 31])
+
+# ---- realistic debts: avalanche wins by hundreds of dollars ----
+let realistic = [debt("Store card", 150000, 269900, 4000), debt("Visa", 850000, 219900, 17000), debt("Personal loan", 500000, 119900, 16000), debt("Car", 1400000, 59900, 33000)]
+let real_snowball = dp.payoff_plan(realistic, usd(100000), "snowball")
+let real_avalanche = dp.payoff_plan(realistic, usd(100000), "avalanche")
+t.check("realistic: total interest, snowball vs avalanche", [real_snowball.total_interest, real_avalanche.total_interest], [usd(548852), usd(500305)])
+t.check("realistic: avalanche saves 485.47", money.subtract(real_snowball.total_interest, real_avalanche.total_interest), usd(48547))
+
+# ---- rejected inputs ----
+def short_budget() { dp.payoff_plan(three, usd(44999), "avalanche") }
+t.check_throws("budget below the sum of minimums", short_budget, "below the sum of the minimum payments (45000)")
+def zero_balance() { dp.payoff_plan([debt("Paid", 0, 100000, 1000)], usd(5000), "snowball") }
+t.check_throws("a non-positive balance", zero_balance, "Paid: balance must be positive")
+def minus_100() { dp.payoff_plan([{name: "Odd", balance: usd(1000), rate: rates.annual(-1000000), minimum_payment: usd(10)}], usd(500), "snowball") }
+t.check_throws("a rate at -100% a month", minus_100, "rate must be above -100% a month")
+def no_debts() { dp.payoff_plan([], usd(500), "snowball") }
+t.check_throws("no debts", no_debts, "non-empty list")
+def bad_strategy() { dp.payoff_plan(three, usd(70000), "fastest") }
+t.check_throws("an unknown strategy", bad_strategy, "strategy must be snowball or avalanche")
+def interest_only() { dp.payoff_plan([debt("Card", 1000000, 240000, 0)], usd(20000), "snowball") }
+t.check_throws("a budget that only covers the interest", interest_only, "never shrink")
+def negative_minimum() { dp.payoff_plan([debt("Card", 1000, 0, -5)], usd(500), "snowball") }
+t.check_throws("a negative minimum", negative_minimum, "minimum payment must not be negative")
+def malformed() { dp.payoff_plan([{name: "Card", balance: usd(1000)}], usd(500), "snowball") }
+t.check_throws("a malformed debt", malformed, "each debt must be {name, balance, rate, minimum_payment}")
+def mixed_currency() { dp.payoff_plan(three, money.make(70000, 2, "EUR"), "snowball") }
+t.check_throws("mixed currencies", mixed_currency, "same currency and scale")
+
+t.finish()

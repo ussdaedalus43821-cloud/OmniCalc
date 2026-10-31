@@ -1,0 +1,203 @@
+# src/finance/debt_payoff.nova - paying off several debts with one monthly
+# budget: snowball (smallest balance first) or avalanche (highest rate first).
+#
+# ---- Convention (CLAUDE.md "Debt payoff convention") ----
+# A debt is {name, balance, rate, minimum_payment}: balance and minimum are
+# positive money (magnitudes, as in amortization.nova); rate is PER MONTH
+# {num, den}, above -100%. monthly_budget is what the person pays in total
+# every month; it must cover the sum of the minimums.
+# Each month:
+#   1. every open debt accrues interest = balance * rate, rounded half-up to
+#      the cent (the cash-flow boundary);
+#   2. every open debt gets its minimum, or its whole balance if smaller;
+#   3. ALL the rest of the budget goes to the first open debt in strategy
+#      order, and cascades to the next one in the same month when it clears.
+# The total paid is the whole budget every month but the last. So when a debt
+# is paid off, its minimum is not "saved" - it rolls into the target debt
+# along with the extra. That rollover is what makes the strategies differ.
+# Order is fixed at the start: snowball = balance ascending, avalanche = rate
+# descending; ties keep the input order. With equal rates the two orders
+# differ but the total interest does not (the combined balance falls by the
+# same budget either way).
+#
+# ---- Result ----
+#   order           debt names in payoff-target order
+#   order_index     the same order as indexes into `debts` (names may repeat)
+#   payoff_months   months until every debt is paid
+#   total_interest, total_paid   money
+#   per_debt        [{name, paid_off_month, interest_paid}] in INPUT order
+# Throws: no debts, a non-positive balance, a negative minimum, a rate at or
+# below -100% a month, a budget below the sum of the minimums, a budget that
+# does not exceed the first month's interest (the debts would never shrink),
+# or more than MAX_MONTHS months.
+#
+# The simulation loop works on plain ints (CLAUDE.md "Hot-loop primitives");
+# every input is validated once before it.
+
+import "../core/money.nova" as money
+import "../core/rates.nova" as rates
+
+let MICRO = rates.MICRO
+let MAX_MONTHS = 1200
+
+def as_money(unit, minor) {
+    return {minor: minor, scale: unit.scale, currency: unit.currency}
+}
+
+# Insertion sort of indexes by `before(a, b)` - stable, so ties keep input order.
+def sorted_indexes(count, before) {
+    let order = []
+    for i = 0 to count - 1 {
+        append(order, i)
+        let j = len(order) - 1
+        while j > 0 and before(order[j], order[j - 1]) {
+            let held = order[j]
+            order[j] = order[j - 1]
+            order[j - 1] = held
+            j = j - 1
+        }
+    }
+    return order
+}
+
+def checked(debts, monthly_budget, strategy) {
+    if type(debts) != "list" or len(debts) == 0 {
+        throw("debt_payoff: debts must be a non-empty list of {name, balance, rate, minimum_payment}")
+    }
+    if strategy != "snowball" and strategy != "avalanche" {
+        throw("debt_payoff: strategy must be snowball or avalanche, got " + str(strategy))
+    }
+    let parsed = {balances: [], minimums: [], nums: [], dens: [], names: [], minimum_sum: 0, first_interest: 0}
+    for debt in debts {
+        if type(debt) != "dict" or not ("name" in debt) or not ("balance" in debt) or not ("rate" in debt) or not ("minimum_payment" in debt) {
+            throw("debt_payoff: each debt must be {name, balance, rate, minimum_payment}, got " + str(debt))
+        }
+        money.check_same_unit(monthly_budget, debt.balance)
+        money.check_same_unit(monthly_budget, debt.minimum_payment)
+        rates.check_rate(debt.rate)
+        if debt.balance.minor <= 0 {
+            throw("debt_payoff: " + debt.name + ": balance must be positive")
+        }
+        if debt.minimum_payment.minor < 0 {
+            throw("debt_payoff: " + debt.name + ": minimum payment must not be negative")
+        }
+        if debt.rate.num <= 0 - debt.rate.den * MICRO {
+            throw("debt_payoff: " + debt.name + ": rate must be above -100% a month")
+        }
+        append(parsed.balances, debt.balance.minor)
+        append(parsed.minimums, debt.minimum_payment.minor)
+        append(parsed.nums, debt.rate.num)
+        append(parsed.dens, debt.rate.den * MICRO)
+        append(parsed.names, debt.name)
+        parsed["minimum_sum"] = parsed.minimum_sum + debt.minimum_payment.minor
+        parsed["first_interest"] = parsed.first_interest + money.round_half_up(debt.balance.minor * debt.rate.num, debt.rate.den * MICRO)
+    }
+    if monthly_budget.minor < parsed.minimum_sum {
+        throw("debt_payoff: the monthly budget (" + str(monthly_budget.minor) + ") is below the sum of the minimum payments (" + str(parsed.minimum_sum) + ")")
+    }
+    if monthly_budget.minor <= parsed.first_interest {
+        throw("debt_payoff: the monthly budget (" + str(monthly_budget.minor) + ") does not exceed the first month's interest (" + str(parsed.first_interest) + "), so the debts never shrink")
+    }
+    return parsed
+}
+
+def strategy_order(parsed, strategy) {
+    let balances = parsed.balances
+    let nums = parsed.nums
+    let dens = parsed.dens
+    def smaller_balance(a, b) {
+        return balances[a] < balances[b]
+    }
+    def higher_rate(a, b) {
+        return nums[a] * dens[b] > nums[b] * dens[a]
+    }
+    if strategy == "snowball" {
+        return sorted_indexes(len(balances), smaller_balance)
+    }
+    return sorted_indexes(len(balances), higher_rate)
+}
+
+# The unchecked core: plain ints in (from checked()), plain ints out. It runs
+# debts x months times (~45 us per debt-month per strategy), so it uses the
+# unchecked money.round_half_up_whole and marks a debt paid off in the same
+# pass that pays it. Inlining the rounding was measured and bought nothing
+# beyond noise, so the one rounding rule stays in one place.
+def simulate_whole(parsed, budget, order) {
+    let count = len(parsed.balances)
+    let nums = parsed.nums
+    let dens = parsed.dens
+    let minimums = parsed.minimums
+    let balance = []
+    let interest = []
+    let paid_off = []
+    for i = 0 to count - 1 {
+        append(balance, parsed.balances[i])
+        append(interest, 0)
+        append(paid_off, 0)
+    }
+    let month = 0
+    let open = count
+    let paid = 0
+    while open > 0 {
+        month = month + 1
+        if month > MAX_MONTHS {
+            throw("debt_payoff: the debts are not paid off within " + str(MAX_MONTHS) + " months")
+        }
+        let available = budget
+        for i = 0 to count - 1 {
+            let b = balance[i]
+            if b > 0 {
+                let charge = money.round_half_up_whole(b * nums[i], dens[i])
+                interest[i] = interest[i] + charge
+                b = b + charge
+                let pay = minimums[i]
+                if pay >= b {
+                    pay = b
+                    paid_off[i] = month
+                    open = open - 1
+                }
+                balance[i] = b - pay
+                available = available - pay
+            }
+        }
+        for i in order {
+            if available > 0 and balance[i] > 0 {
+                let pay = available
+                if pay >= balance[i] {
+                    pay = balance[i]
+                    paid_off[i] = month
+                    open = open - 1
+                }
+                balance[i] = balance[i] - pay
+                available = available - pay
+            }
+        }
+        paid = paid + budget - available
+    }
+    return {months: month, paid: paid, interest: interest, paid_off: paid_off}
+}
+
+export def payoff_plan(debts, monthly_budget, strategy) {
+    let parsed = checked(debts, monthly_budget, strategy)
+    let order = strategy_order(parsed, strategy)
+    let run = simulate_whole(parsed, monthly_budget.minor, order)
+    let names = []
+    for i in order {
+        append(names, parsed.names[i])
+    }
+    let per_debt = []
+    let total = {interest: 0}
+    for i = 0 to len(parsed.names) - 1 {
+        append(per_debt, {name: parsed.names[i], paid_off_month: run.paid_off[i], interest_paid: as_money(monthly_budget, run.interest[i])})
+        total["interest"] = total.interest + run.interest[i]
+    }
+    return {
+        strategy: strategy,
+        order: names,
+        order_index: order,
+        payoff_months: run.months,
+        total_interest: as_money(monthly_budget, total.interest),
+        total_paid: as_money(monthly_budget, run.paid),
+        per_debt: per_debt
+    }
+}

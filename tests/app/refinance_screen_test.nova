@@ -1,5 +1,5 @@
 # module: refinance_screen
-# expect: 9
+# expect: 12
 #
 # The canonical refinance scenario (tests/finance/refinance_test.nova),
 # typed in as a person would.
@@ -11,7 +11,7 @@ let result = screen.calculate("200,000.00", "6.5", "360", "1,264.14", "5.0", "36
 t.check("new payment", result.new_payment, 107364)
 t.check("monthly savings", result.monthly_savings, 19050)
 t.check("break-even text", result.break_even, "month 32")
-t.check("total and lifetime savings", [result.total_savings, result.lifetime_savings], [6257258, 6257258])
+t.check("lifetime savings and savings over the remaining term", [result.lifetime_savings, result.savings_over_remaining_term], [6257258, 6257258])
 t.check("scenario rows", result.rows, [["Keep current loan", 126414, 45508582, 25508582, 360, 0], ["Refinance", 107364, 38651324, 18651324, 360, 600000]])
 t.check("column kinds line up with columns", len(result.column_kinds), len(result.columns))
 t.check("never breaking even reads as never", screen.calculate("200000", "6.5", "360", "1264.14", "6.4", "360", "100000").break_even, "never")
@@ -19,5 +19,11 @@ def higher_rate() { screen.calculate("200000", "6.5", "360", "1264.14", "7", "36
 t.check_throws("a refinance that saves nothing is rejected", higher_rate, "saves nothing")
 def bad_closing() { screen.calculate("200000", "6.5", "360", "1264.14", "5", "360", "6000.001") }
 t.check_throws("closing costs with too many decimals are rejected", bad_closing, "closing costs \"6000.001\" has more than 2 decimal places")
+
+# ---- M6: lifetime is the headline, phrased so a loss never reads as a saving ----
+t.check("headline phrase: saves", result.lifetime_result, {before: "saves ", amount: 6257258, after: " over both loans' lives"})
+let thirty_to_fifteen = screen.calculate("200000", "6.5", "360", "1264.14", "5.0", "180", "6000")
+t.check("30 -> 15: the shorter-term number is clearly negative, the lifetime headline positive", [thirty_to_fifteen.savings_over_remaining_term, thirty_to_fifteen.lifetime_result.before, thirty_to_fifteen.lifetime_result.amount], [-6314028, "saves ", 16440034])
+t.check("a lifetime loss reads as a cost", screen.calculate("200000", "6.5", "360", "1264.14", "6.4", "360", "100000").lifetime_result, {before: "costs ", amount: 9527999, after: " MORE than keeping the current loan"})
 
 t.finish()

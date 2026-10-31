@@ -1,0 +1,39 @@
+# module: parse_helpers
+# expect: 18
+#
+# Every edge case that used to be spread over three facades' private copies.
+
+import "../../tools/check.nova" as t
+import "../../src/app/parse_helpers.nova" as inputs
+import "../../src/core/money.nova" as money
+import "../../src/core/rates.nova" as rates
+
+t.check("amount: grouping and cents", inputs.amount("200,000.00", "principal"), money.make(20000000, 2, "USD"))
+t.check("amount: zero is allowed", inputs.amount("0", "extra"), money.make(0, 2, "USD"))
+def negative_amount() { inputs.amount("-5", "principal") }
+t.check_throws("amount: negative is rejected at parse time (the drift M6 fixed)", negative_amount, "parse: principal must not be negative")
+def amount_decimals() { inputs.amount("1.005", "principal") }
+t.check_throws("amount: more than 2 decimals is rejected, not rounded", amount_decimals, "has more than 2 decimal places")
+def amount_text() { inputs.amount("12a", "principal") }
+t.check_throws("amount: letters", amount_text, "is not a number")
+t.check("rate: 6.5% -> 65000 micro-units", inputs.annual_rate_micro("6.5", "rate", false), 65000)
+t.check("rate: 0.0001% is one micro-unit", inputs.annual_rate_micro("0.0001", "rate", false), 1)
+def rate_five_decimals() { inputs.annual_rate_micro("6.12345", "rate", false) }
+t.check_throws("rate: more than 4 decimals is rejected", rate_five_decimals, "has more than 4 decimal places")
+def loan_negative_rate() { inputs.annual_rate_micro("-1", "annual rate", false) }
+t.check_throws("rate: negative rejected when not allowed", loan_negative_rate, "annual rate must not be negative")
+t.check("rate: negative allowed when allowed", inputs.annual_rate_micro("-2", "rate", true), -20000)
+def minus_100() { inputs.annual_rate_micro("-100", "annual rate", true) }
+t.check_throws("rate: -100% is rejected even when negatives are allowed", minus_100, "annual rate must be above -100%")
+t.check("rate: -99.9999% is the most negative allowed", inputs.annual_rate_micro("-99.9999", "rate", true), -999999)
+t.check("monthly rate: annual / 12, exact", inputs.monthly_rate("6.5", "rate", false), rates.per_period(rates.annual(65000), 12))
+t.check("count: in range", inputs.count("360", "months", 1, 1200), 360)
+def count_low() { inputs.count("0", "months", 1, 1200) }
+t.check_throws("count: below the range", count_low, "months must be 1-1200, got 0")
+def count_high() { inputs.count("1201", "months", 1, 1200) }
+t.check_throws("count: above the range", count_high, "months must be 1-1200, got 1201")
+def count_fraction() { inputs.count("12.5", "months", 1, 1200) }
+t.check_throws("count: a fraction", count_fraction, "has more than 0 decimal places")
+t.check("constants", [inputs.CURRENCY, inputs.SCALE, inputs.RATE_INPUT_SCALE, inputs.MONTHS_PER_YEAR], ["USD", 2, 4, 12])
+
+t.finish()

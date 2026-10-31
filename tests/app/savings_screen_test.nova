@@ -1,5 +1,5 @@
 # module: savings_screen
-# expect: 12
+# expect: 22
 #
 # Reference values from tests/app/gen_savings_vectors.py (80-digit decimal,
 # end-of-month contributions, textbook FV formula).
@@ -7,22 +7,41 @@
 import "../../tools/check.nova" as t
 import "../../src/app/savings_screen.nova" as screen
 
-let plan = screen.calculate("10,000.00", "500", "7", "30")
+let plan = screen.calculate("fv", "10,000.00", "500", "7", "30", "")
 t.check("future value", plan.future_value, 69115047)
 t.check("total contributed (10,000 + 360 x 500)", plan.total_contributed, 19000000)
 t.check("total interest", plan.total_interest, 69115047 - 19000000)
 t.check("one row per year", len(plan.rows), 30)
 t.check("year 1", plan.rows[0], [1, 1600000, 1691919 - 1600000, 1691919])
 t.check("year 10 balance", plan.rows[9][3], 10663902)
-t.check("zero rate: just the contributions", screen.calculate("0", "200", "0", "5").future_value, 1200000)
-t.check("negative rate shrinks a lump sum", screen.calculate("5000", "0", "-2", "3").future_value, 470859)
-def rate_minus_100() { screen.calculate("5000", "0", "-100", "3") }
+t.check("zero rate: just the contributions", screen.calculate("fv", "0", "200", "0", "5", "").future_value, 1200000)
+t.check("negative rate shrinks a lump sum", screen.calculate("fv", "5000", "0", "-2", "3", "").future_value, 470859)
+def rate_minus_100() { screen.calculate("fv", "5000", "0", "-100", "3", "") }
 t.check_throws("an annual rate of -100% is rejected", rate_minus_100, "must be above -100%")
-def fractional_years() { screen.calculate("5000", "0", "5", "2.5") }
+def fractional_years() { screen.calculate("fv", "5000", "0", "5", "2.5", "") }
 t.check_throws("fractional years are rejected", fractional_years, "years \"2.5\" has more than 0 decimal places")
-def zero_years() { screen.calculate("5000", "0", "5", "0") }
+def zero_years() { screen.calculate("fv", "5000", "0", "5", "0", "") }
 t.check_throws("zero years is rejected", zero_years, "years must be 1-100")
-def negative_contribution() { screen.calculate("5000", "-10", "5", "3") }
+def negative_contribution() { screen.calculate("fv", "5000", "-10", "5", "3", "") }
 t.check_throws("a negative contribution is rejected", negative_contribution, "monthly contribution must not be negative")
+
+# ---- solve for the contribution (M6) ----
+let goal = screen.calculate("pmt", "10,000.00", "", "7", "30", "1,000,000.00")
+t.check("pmt: contribution needed for 1,000,000 in 30 years at 7%", goal.monthly_contribution, 75316)
+t.check("pmt: the actual final balance with that rounded contribution", goal.future_value, 99999833)
+t.check("pmt: 30 yearly rows", len(goal.rows), 30)
+def already_there() { screen.calculate("pmt", "1,000,000", "", "7", "30", "500,000") }
+t.check_throws("pmt: an initial deposit that already reaches the target", already_there, "no monthly contribution is needed")
+
+# ---- solve for the time (M6) ----
+let wait = screen.calculate("n", "10,000.00", "500", "7", "", "250,000.00")
+t.check("n: months to 250,000 (215.75 exact -> 216)", wait.months, 216)
+t.check("n: as text", wait.time, "18 years")
+t.check("n: balance at month 216 reaches the target", wait.future_value >= 25000000, true)
+t.check("n: a partial final year is labelled", screen.calculate("n", "0", "1000", "0", "", "12,500").time, "1 year 1 month")
+def unreachable() { screen.calculate("n", "0", "0", "0", "", "100") }
+t.check_throws("n: no contribution and no growth never reaches the target", unreachable, "tvm:")
+def bad_mode() { screen.calculate("rate", "0", "0", "0", "1", "100") }
+t.check_throws("an unknown mode is rejected", bad_mode, "mode must be fv, pmt or n")
 
 t.finish()

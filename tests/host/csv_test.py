@@ -70,13 +70,24 @@ class RefinanceCsvTest(unittest.TestCase):
 
 class SavingsCsvTest(unittest.TestCase):
     def test_one_row_per_year(self):
-        result = app.calculate("savings", "10,000.00", "500", "7", "30")
+        result = app.calculate("savings", "fv", "10,000.00", "500", "7", "30", "")
         buffer = io.StringIO()
         app.export_csv(result, buffer)
         rows = list(csv.reader(io.StringIO(buffer.getvalue())))
         self.assertEqual(rows[0], ["year", "contributed", "interest_earned", "balance"])
         self.assertEqual(len(rows), 31)
         self.assertEqual(rows[30][3], "691150.47")
+
+
+class DebtPayoffCsvTest(unittest.TestCase):
+    def test_per_debt_rows(self):
+        result = app.calculate("debt_payoff", [["Medical", "1,200", "0", "50"], ["Card", "6,000", "24.99", "150"], ["Car", "9,000", "7", "250"]], "700", "avalanche")
+        buffer = io.StringIO()
+        app.export_csv(result, buffer)
+        rows = list(csv.reader(io.StringIO(buffer.getvalue())))
+        self.assertEqual(rows[0], ["order", "debt", "balance", "apr", "minimum", "paid_off_month", "interest_paid"])
+        self.assertEqual(rows[1], ["1", "Card", "6000.00", "24.9900%", "150.00", "19", "1268.70"])
+        self.assertEqual(len(rows), 4)
 
 
 if __name__ == "__main__":

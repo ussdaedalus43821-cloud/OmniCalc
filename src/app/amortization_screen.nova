@@ -11,21 +11,19 @@
 #   month; the final payment is adjusted to clear the balance; the
 #   "IRR-implied annual rate" is the schedule's monthly IRR x 12.
 
-import "../core/parse.nova" as parse
+import "./parse_helpers.nova" as inputs
 import "../core/money.nova" as money
 import "../core/rates.nova" as rates
 import "../finance/tvm.nova" as tvm
 import "../finance/amortization.nova" as am
 import "../finance/cashflow.nova" as cf
 
-let CURRENCY = "USD"
-let SCALE = 2
-# The annual rate is typed in percent with up to 4 decimals, which is
-# exactly micro-units of a fraction: "6.5" -> 65000 (1e-6 = 0.0001%).
-let RATE_INPUT_SCALE = 4
+let CURRENCY = inputs.CURRENCY
+let SCALE = inputs.SCALE
 # The IRR-implied rate is shown in percent with 4 decimals.
 let RATE_DISPLAY_SCALE = 4
-let MONTHS_PER_YEAR = 12
+let MONTHS_PER_YEAR = inputs.MONTHS_PER_YEAR
+let MAX_MONTHS = 1200
 
 let ASSUMPTIONS = [
     "Payments are monthly, at the end of each month.",
@@ -36,24 +34,16 @@ let ASSUMPTIONS = [
     "IRR-implied annual rate = the schedule's monthly IRR x 12, from the actual rounded payments."
 ]
 
-def amount(text, what) {
-    return money.make(parse.decimal(text, SCALE, what), SCALE, CURRENCY)
-}
-
 export def calculate(principal_text, rate_text, months_text, extra_text) {
-    let principal = amount(principal_text, "principal")
-    let annual_micro = parse.decimal(rate_text, RATE_INPUT_SCALE, "annual rate")
-    if annual_micro < 0 {
-        throw("parse: annual rate must not be negative")
-    }
-    let months = parse.whole(months_text, "number of months")
+    let principal = inputs.amount(principal_text, "principal")
+    let monthly = inputs.monthly_rate(rate_text, "annual rate", false)
+    let months = inputs.count(months_text, "number of months", 1, MAX_MONTHS)
     let extra_typed = extra_text
     if trim(extra_text) == "" {
         extra_typed = "0"
     }
-    let extra = amount(extra_typed, "extra principal per month")
+    let extra = inputs.amount(extra_typed, "extra principal per month")
 
-    let monthly = rates.per_period(rates.annual(annual_micro), MONTHS_PER_YEAR)
     let payment = money.negate(tvm.pmt(principal, money.make(0, SCALE, CURRENCY), months, monthly))
     let table = am.schedule_table(principal, monthly, months, payment, extra, [])
     let rate = cf.table_irr(table, monthly)

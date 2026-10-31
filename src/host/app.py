@@ -35,11 +35,17 @@ from src.host import nova_runtime  # noqa: E402
 
 BUDGET_MS = 100
 
-# One entry per screen. "fields" are (key, label, default text) in the order
-# the facade's calculate() takes them. "summary" items are (result key,
-# label, kind); kinds: "money" (int at the result's scale), "count",
-# "percent" ({value, scale}), "text". The table and CSV come from the
-# result's columns / column_kinds / rows.
+# One entry per screen. "fields" are (key, label, default[, options]) in the
+# order the facade's calculate() takes them. options may be
+#   {"choices": [(value, label), ...]}   a drop-down; the facade gets `value`
+#   {"rows": [label, ...]}               an editable list of rows; the facade
+#                                        gets a list of lists of strings and
+#                                        `default` is the starting rows
+# "summary" items are (result key, label, kind); kinds: "money" (an int at
+# the result's scale), "count", "percent" ({value, scale}), "text", and
+# "phrase" ({before, amount, after}: words around a money amount, so the
+# facade decides how a number reads - "saves X" vs "costs X more"). The
+# table and CSV come from the result's columns / column_kinds / rows.
 SCREENS = [
     {
         "key": "amortization",
@@ -64,13 +70,17 @@ SCREENS = [
         "title": "Savings",
         "facade": os.path.join("src", "app", "savings_screen.nova"),
         "fields": [
+            ("mode", "Solve for", "fv", {"choices": [("fv", "Future value"), ("pmt", "Monthly contribution"), ("n", "Time to goal")]}),
             ("initial", "Initial deposit", "10,000.00"),
             ("contribution", "Monthly contribution", "500.00"),
             ("rate", "Annual rate (%)", "7"),
             ("years", "Years", "30"),
+            ("target", "Target (goal modes)", "250,000.00"),
         ],
         "summary": [
-            ("future_value", "Future value", "money"),
+            ("future_value", "Final balance", "money"),
+            ("monthly_contribution", "Monthly contribution", "money"),
+            ("time", "Time", "text"),
             ("total_contributed", "Total contributed", "money"),
             ("total_interest", "Total interest", "money"),
         ],
@@ -89,11 +99,28 @@ SCREENS = [
             ("closing", "Closing costs", "6,000.00"),
         ],
         "summary": [
+            ("lifetime_result", "Refinancing", "phrase"),
             ("new_payment", "New payment", "money"),
-            ("monthly_savings", "Monthly savings", "money"),
+            ("monthly_savings", "Monthly change", "money"),
             ("break_even", "Break-even", "text"),
-            ("total_savings", "Savings (shorter term)", "money"),
-            ("lifetime_savings", "Lifetime savings", "money"),
+            ("savings_over_remaining_term", "Net over the shorter term only", "money"),
+        ],
+    },
+    {
+        "key": "debt_payoff",
+        "title": "Debt payoff",
+        "facade": os.path.join("src", "app", "debt_payoff_screen.nova"),
+        "fields": [
+            ("debts", "Debts", [["Medical", "1,200.00", "0", "50.00"], ["Card", "6,000.00", "24.99", "150.00"], ["Car", "9,000.00", "7", "250.00"]],
+             {"rows": ["Name", "Balance", "APR (%)", "Minimum"]}),
+            ("budget", "Monthly budget", "700.00"),
+            ("strategy", "Strategy", "avalanche", {"choices": [("avalanche", "Avalanche (highest rate first)"), ("snowball", "Snowball (smallest balance first)")]}),
+        ],
+        "summary": [
+            ("avalanche", "Avalanche", "phrase"),
+            ("snowball", "Snowball", "phrase"),
+            ("difference", "Difference", "phrase"),
+            ("payoff_months", "Debt-free in (months)", "count"),
         ],
     },
 ]
@@ -156,6 +183,8 @@ def format_value(value, kind, scale, grouping=True):
         return format_minor(value, scale, grouping)
     if kind == "percent":
         return format_minor(value["value"], value["scale"], grouping) + "%"
+    if kind == "phrase":
+        return "".join([value["before"], format_minor(value["amount"], scale, grouping), value["after"]])
     return str(value)
 
 
@@ -170,7 +199,11 @@ def export_csv(result, handle):
 
 
 def default_inputs(screen_key):
-    return [default for _, _, default in SCREENS_BY_KEY[screen_key]["fields"]]
+    return [field[2] for field in SCREENS_BY_KEY[screen_key]["fields"]]
+
+
+def field_options(field):
+    return field[3] if len(field) > 3 else {}
 
 
 def warm_up():
@@ -192,6 +225,47 @@ def parse_args(argv):
     return options
 
 
+def build_rows_field(parent, label, default_rows, headings, on_change, tk, ttk):
+    """An editable list of rows (e.g. debts): one Entry per cell, with Add row
+    and Remove last row. Returns a reader giving a list of lists of strings.
+    Rows are stacked with pack(), so no grid index arithmetic is needed."""
+    box = ttk.LabelFrame(parent, text=label, padding=6)
+    box.pack(fill="x", padx=10)
+    header = ttk.Frame(box)
+    header.pack(fill="x")
+    for heading in headings:
+        ttk.Label(header, text=heading, width=18).pack(side="left", padx=2)
+    body = ttk.Frame(box)
+    body.pack(fill="x")
+    rows = []
+
+    def add_row(values):
+        line = ttk.Frame(body)
+        line.pack(fill="x", pady=1)
+        cells = []
+        for value in values:
+            variable = tk.StringVar(value=value)
+            variable.trace_add("write", on_change)
+            ttk.Entry(line, width=20, textvariable=variable).pack(side="left", padx=2)
+            cells.append(variable)
+        rows.append((line, cells))
+        on_change()
+
+    def remove_row():
+        if rows:
+            line, _ = rows.pop()
+            line.destroy()
+            on_change()
+
+    for values in default_rows:
+        add_row(values)
+    controls = ttk.Frame(box)
+    controls.pack(fill="x", pady=(4, 0))
+    ttk.Button(controls, text="Add row", command=lambda: add_row(["" for _ in headings])).pack(side="left", padx=2)
+    ttk.Button(controls, text="Remove last row", command=remove_row).pack(side="left", padx=2)
+    return lambda: [[cell.get() for cell in cells] for _, cells in rows]
+
+
 def build_tab(notebook, screen, debug, tk, ttk, filedialog):
     """One screen's tab: inputs, Calculate / Export CSV, summary, table,
     assumptions. Returns (frame, Calculate handler)."""
@@ -207,13 +281,27 @@ def build_tab(notebook, screen, debug, tk, ttk, filedialog):
         if state["result"] is not None:
             status.config(text="Inputs changed - press Calculate to refresh the results.")
 
-    variables = []
-    for column, (key, label, default) in enumerate(screen["fields"]):
-        variable = tk.StringVar(value=default)
-        variable.trace_add("write", mark_stale)
+    readers = []
+    column = 0
+    for field in screen["fields"]:
+        key, label, default = field[0], field[1], field[2]
+        options = field_options(field)
+        if "rows" in options:
+            readers.append(build_rows_field(frame, label, default, options["rows"], mark_stale, tk, ttk))
+            continue
         ttk.Label(form, text=label).grid(row=0, column=column, sticky="w", padx=4)
-        ttk.Entry(form, width=15, textvariable=variable).grid(row=1, column=column, padx=4)
-        variables.append(variable)
+        if "choices" in options:
+            labels_to_values = {text: value for value, text in options["choices"]}
+            values_to_labels = {value: text for value, text in options["choices"]}
+            variable = tk.StringVar(value=values_to_labels[default])
+            ttk.Combobox(form, textvariable=variable, values=list(labels_to_values), state="readonly", width=26).grid(row=1, column=column, padx=4)
+            readers.append(lambda variable=variable, mapping=labels_to_values: mapping[variable.get()])
+        else:
+            variable = tk.StringVar(value=default)
+            ttk.Entry(form, width=15, textvariable=variable).grid(row=1, column=column, padx=4)
+            readers.append(variable.get)
+        variable.trace_add("write", mark_stale)
+        column = len(readers)
 
     buttons = ttk.Frame(frame, padding=(10, 0))
     buttons.pack(fill="x")
@@ -243,7 +331,7 @@ def build_tab(notebook, screen, debug, tk, ttk, filedialog):
     def on_calculate():
         start = time.perf_counter()
         try:
-            result = calculate(screen["key"], *(variable.get() for variable in variables))
+            result = calculate(screen["key"], *(read() for read in readers))
         except CalculationError as error:
             error_label.config(text=str(error))
             return
