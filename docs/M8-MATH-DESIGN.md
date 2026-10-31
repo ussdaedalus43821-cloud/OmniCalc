@@ -1,7 +1,9 @@
 # M8 — Math engine: API proposal (for review before implementation)
 
-Status: **proposal**. Nothing under `src/math/` is implemented yet except the data file
-`src/math/units.json`. The Python reference generator `tests/math/gen_math_vectors.py` already
+Status: **API approved**:
+- `scientific.nova` is **implemented and green** (112 checks against the generator's vectors);
+- `units.nova` and `datetime.nova` are next;
+- the data file is `src/math/units.json`. The Python reference generator `tests/math/gen_math_vectors.py` already
 encodes the semantics below, so reviewing this document and the generated vectors together is
 reviewing the behavior.
 
@@ -57,7 +59,10 @@ NovaLang lacks these, so they're implemented here (the generator checks them aga
 `math` module at a relative 1e-14):
 - `exp(x) = pow(E, x)`;
 - `atan`: argument reduction to |x| ≤ tan(π/12), then its Taylor series;
-- `asin(x) = atan(x / sqrt(1 − x²))`, and `acos = π/2 − asin`;
+- `asin(x) = atan(x / sqrt((1 − x)(1 + x)))` (the factored form loses less near ±1), and
+  `acos = π/2 − asin`;
+- `atan` for |x| > 1 uses `π/2 − atan(1/x)`, and for x in (tan 15°, 1] uses
+  `π/6 + atan((x√3 − 1)/(√3 + x))`. The series then only sees |y| ≤ 0.268;
 - hyperbolics from `exp`.
 
 ### Display

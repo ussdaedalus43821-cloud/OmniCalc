@@ -1,0 +1,1123 @@
+# src/math/scientific.nova - a scientific calculator: exact rationals where
+# possible, floats for transcendentals, and an expression evaluator.
+# The design and its conventions are in docs/M8-MATH-DESIGN.md; the reference
+# is tests/math/gen_math_vectors.py.
+#
+# ---- Values ----
+#   {kind: "exact", num, den}  a reduced rational, den > 0
+#   {kind: "float", value}     a finite binary float (non-finite = error)
+# Exact whenever possible: literals (0.1 = 1/10), + - * /, integer powers,
+# perfect roots, factorials, rounding. Any float operand makes a float.
+#
+# ---- NovaLang limitations worked around here (docs/ESCAPE-HATCHES.md) ----
+#   no exp/atan/asin/acos/hyperbolic built-ins (written below); the built-in
+#   `log` is the stderr LOGGER, never called here; no exponent literals (the
+#   tokenizer reads them); str(float) is unusable for display (display() is
+#   an exact routine of its own).
+
+# PI and E are NovaLang globals of the top-level script only: inside an
+# imported module they are undefined (verified, M8). These literals are the
+# same doubles (3.141592653589793 == PI and 2.718281828459045 == E).
+let MATH_PI = 3.141592653589793
+let MATH_E = 2.718281828459045
+
+let MAX_LENGTH = 500
+let MAX_FACTORIAL = 1000
+let MAX_EXACT_EXPONENT = 4096
+let MAX_EXACT_DIGITS = 100000
+let MAX_ROOT_INDEX = 64
+let MAX_LITERAL_EXPONENT = 10000
+let DEFAULT_DIGITS = 12
+let DIGIT_CHARS = "0123456789"
+let LETTER_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+let OPERATOR_CHARS = "+-*/^(),!"
+
+def fail(message) {
+    throw("math: " + message)
+}
+
+# ================================================================ rationals
+
+def gcd(a, b) {
+    let x = abs(a)
+    let y = abs(b)
+    while y != 0 {
+        let r = x % y
+        x = y
+        y = r
+    }
+    return x
+}
+
+export def exact(numerator, denominator) {
+    if denominator == 0 {
+        fail("division by zero")
+    }
+    let n = numerator
+    let d = denominator
+    if d < 0 {
+        n = 0 - n
+        d = 0 - d
+    }
+    let g = gcd(n, d)
+    if g > 1 {
+        n = n // g
+        d = d // g
+    }
+    return {kind: "exact", num: n, den: d}
+}
+
+def is_exact(v) {
+    return v.kind == "exact"
+}
+
+def is_integer(v) {
+    return v.kind == "exact" and v.den == 1
+}
+
+# A float value; non-finite results are errors, never vals.
+def float_value(x) {
+    if not (x == x and x - x == 0) {
+        fail("the result is not a finite number")
+    }
+    return {kind: "float", value: x}
+}
+
+def digit_count(n) {
+    return len(str(abs(n)))
+}
+
+export def to_float(v) {
+    if v.kind == "float" {
+        return v.value
+    }
+    # int / int on huge vals would raise a raw Python OverflowError
+    if digit_count(v.num) - digit_count(v.den) > 307 {
+        fail("the result is not a finite number")
+    }
+    return v.num * 1.0 / v.den
+}
+
+def add(a, b) {
+    if is_exact(a) and is_exact(b) {
+        return exact(a.num * b.den + b.num * a.den, a.den * b.den)
+    }
+    return float_value(to_float(a) + to_float(b))
+}
+
+def sub(a, b) {
+    if is_exact(a) and is_exact(b) {
+        return exact(a.num * b.den - b.num * a.den, a.den * b.den)
+    }
+    return float_value(to_float(a) - to_float(b))
+}
+
+def mul(a, b) {
+    if is_exact(a) and is_exact(b) {
+        return exact(a.num * b.num, a.den * b.den)
+    }
+    return float_value(to_float(a) * to_float(b))
+}
+
+def divide(a, b) {
+    if is_exact(b) and b.num == 0 {
+        fail("division by zero")
+    }
+    if is_exact(a) and is_exact(b) {
+        return exact(a.num * b.den, a.den * b.num)
+    }
+    let y = to_float(b)
+    if y == 0 {
+        fail("division by zero")
+    }
+    return float_value(to_float(a) / y)
+}
+
+def negate(a) {
+    if is_exact(a) {
+        return {kind: "exact", num: 0 - a.num, den: a.den}
+    }
+    return {kind: "float", value: 0 - a.value}
+}
+
+# -1, 0 or 1.
+def compare(a, b) {
+    if is_exact(a) and is_exact(b) {
+        let l = a.num * b.den
+        let r = b.num * a.den
+        if l < r {
+            return -1
+        }
+        if l > r {
+            return 1
+        }
+        return 0
+    }
+    let x = to_float(a)
+    let y = to_float(b)
+    if x < y {
+        return -1
+    }
+    if x > y {
+        return 1
+    }
+    return 0
+}
+
+def sign_of(v) {
+    return compare(v, exact(0, 1))
+}
+
+# floor(k-th root of n) for an int n >= 0, exact (Newton's method from above).
+def iroot(n, k) {
+    if n < 2 {
+        return n
+    }
+    let x = pow(10, digit_count(n) // k + 1)
+    while true {
+        let y = ((k - 1) * x + n // pow(x, k - 1)) // k
+        if y >= x {
+            return x
+        }
+        x = y
+    }
+}
+
+export def isqrt(n) {
+    return iroot(n, 2)
+}
+
+# The exact k-th root of an exact value, or {} if it is not a perfect power.
+def exact_root(v, k) {
+    let negative = v.num < 0
+    if negative and k % 2 == 0 {
+        fail("not a real number")
+    }
+    let rn = iroot(abs(v.num), k)
+    let rd = iroot(v.den, k)
+    if pow(rn, k) != abs(v.num) or pow(rd, k) != v.den {
+        return {}
+    }
+    if negative {
+        rn = 0 - rn
+    }
+    return exact(rn, rd)
+}
+
+def exact_integer_power(v, n) {
+    if v.num == 0 and n < 0 {
+        fail("division by zero")
+    }
+    if n >= 0 {
+        return exact(pow(v.num, n), pow(v.den, n))
+    }
+    return exact(pow(v.den, 0 - n), pow(v.num, 0 - n))
+}
+
+def fits_exact_power(v, n) {
+    let size = digit_count(v.num)
+    if digit_count(v.den) > size {
+        size = digit_count(v.den)
+    }
+    return abs(n) <= MAX_EXACT_EXPONENT and size * abs(n) <= MAX_EXACT_DIGITS
+}
+
+# base ^ exponent, exact when possible (docs/M8-MATH-DESIGN.md "Exactness").
+def power(base, exponent) {
+    if is_exact(base) and is_exact(exponent) {
+        if exponent.den == 1 {
+            if fits_exact_power(base, exponent.num) {
+                return exact_integer_power(base, exponent.num)
+            }
+        } else if exponent.den <= MAX_ROOT_INDEX {
+            let root = exact_root(base, exponent.den)
+            if "num" in root and fits_exact_power(root, exponent.num) {
+                return exact_integer_power(root, exponent.num)
+            }
+        }
+    }
+    let b = to_float(base)
+    let e = to_float(exponent)
+    if b == 0 and e < 0 {
+        fail("division by zero")
+    }
+    if b < 0 and floor(e) != e {
+        # A negative base only has a real power for an exact p/q with odd q.
+        if is_exact(exponent) and exponent.den % 2 == 1 {
+            let magnitude = float_pow(0 - b, e)
+            if exponent.num % 2 == 0 {
+                return float_value(magnitude)
+            }
+            return float_value(0 - magnitude)
+        }
+        fail("not a real number")
+    }
+    return float_value(float_pow(b, e))
+}
+
+# pow() raises a NovaLang error on overflow; report it as ours.
+def float_pow(b, e) {
+    let out = {value: 0}
+    try {
+        out["value"] = pow(b, e)
+    } catch problem {
+        fail("the result is not a finite number")
+    }
+    return out.value
+}
+
+# ================================================================ floats -> exact
+
+# A float's exact binary value as a rational: doubling is exact in binary
+# floating point, so this terminates (at most a few dozen steps for normal
+# vals, 1,074 for the smallest subnormal).
+def float_to_exact(x) {
+    if floor(x) == x {
+        return exact(floor(x), 1)
+    }
+    let y = x
+    let k = 0
+    while floor(y) != y {
+        y = y * 2
+        k = k + 1
+    }
+    return exact(floor(y), pow(2, k))
+}
+
+# ================================================================ display
+
+# numerator / denominator rounded half-up (away from zero) to an integer.
+def round_half_up(n, d) {
+    if n >= 0 {
+        return (2 * n + d) // (2 * d)
+    }
+    return 0 - ((0 - 2 * n + d) // (2 * d))
+}
+
+def trim_fraction(text) {
+    if not ("." in text) {
+        return text
+    }
+    let out = text
+    while out[len(out) - 1] == "0" {
+        out = out[0:len(out) - 1]
+    }
+    if out[len(out) - 1] == "." {
+        out = out[0:len(out) - 1]
+    }
+    return out
+}
+
+# |n| / d as plain decimal text with exactly `places` decimals (then trimmed);
+# n / d must be exactly representable with that many decimals.
+def decimal_text(n, d, places) {
+    let scaled = n * pow(10, places) // d
+    let digits = str(scaled)
+    if places == 0 {
+        return digits
+    }
+    while len(digits) <= places {
+        digits = "0" + digits
+    }
+    let cut = len(digits) - places
+    return trim_fraction(digits[0:cut] + "." + digits[cut:len(digits)])
+}
+
+# The decimal places needed if n/d terminates within `limit`, else -1.
+def terminating_places(d, limit) {
+    let rest = d
+    let twos = 0
+    let fives = 0
+    while rest % 2 == 0 {
+        rest = rest // 2
+        twos = twos + 1
+    }
+    while rest % 5 == 0 {
+        rest = rest // 5
+        fives = fives + 1
+    }
+    let places = twos
+    if fives > places {
+        places = fives
+    }
+    if rest != 1 or places > limit {
+        return -1
+    }
+    return places
+}
+
+# |n| / d (n > 0) to `digits` significant figures, half-up, with the
+# design's notation rules: scientific when the exponent is >= 12 or <= -7.
+def significant_text(n, d, digits) {
+    # The decimal exponent of the leading digit.
+    let e = digit_count(n) - digit_count(d)
+    let probe = {e: e}
+    if probe.e >= 0 {
+        if n < d * pow(10, probe.e) {
+            probe["e"] = probe.e - 1
+        }
+    } else {
+        if n * pow(10, 0 - probe.e) < d {
+            probe["e"] = probe.e - 1
+        }
+    }
+    let shift = digits - 1 - probe.e
+    let m = 0
+    if shift >= 0 {
+        m = round_half_up(n * pow(10, shift), d)
+    } else {
+        m = round_half_up(n, d * pow(10, 0 - shift))
+    }
+    if m == pow(10, digits) {
+        m = m // 10
+        probe["e"] = probe.e + 1
+    }
+    let ds = str(m)
+    let exponent = probe.e
+    if exponent >= 12 or exponent <= -7 {
+        let mantissa = trim_fraction(ds[0:1] + "." + ds[1:len(ds)])
+        let sign = "+"
+        if exponent < 0 {
+            sign = "-"
+        }
+        let magnitude = str(abs(exponent))
+        if len(magnitude) < 2 {
+            magnitude = "0" + magnitude
+        }
+        return mantissa + "e" + sign + magnitude
+    }
+    if exponent >= 0 {
+        return trim_fraction(ds[0:exponent + 1] + "." + ds[exponent + 1:len(ds)])
+    }
+    let zeros = ""
+    for i = 1 to 0 - exponent - 1 {
+        zeros = zeros + "0"
+    }
+    return trim_fraction("0." + zeros + ds)
+}
+
+def rational_display(v, digits, from_float) {
+    if v.num == 0 {
+        return "0"
+    }
+    let sign = ""
+    if v.num < 0 {
+        sign = "-"
+    }
+    let n = abs(v.num)
+    if not from_float {
+        if v.den == 1 {
+            return sign + str(n)
+        }
+        let places = terminating_places(v.den, digits)
+        if places >= 0 {
+            return sign + decimal_text(n, v.den, places)
+        }
+    }
+    return sign + significant_text(n, v.den, digits)
+}
+
+# A value as display text (docs/M8-MATH-DESIGN.md "Display").
+export def display(v, digits) {
+    if v.kind == "float" {
+        return rational_display(float_to_exact(v.value), digits, true)
+    }
+    return rational_display(v, digits, false)
+}
+
+# "num/den" for a non-integer exact value, else "".
+export def exact_text(v) {
+    if v.kind == "exact" and v.den != 1 {
+        return str(v.num) + "/" + str(v.den)
+    }
+    return ""
+}
+
+# ================================================================ float functions
+
+# atan for x in [0, 1]: reduce to |y| <= tan(pi/12) with
+# atan(x) = pi/6 + atan((x*sqrt(3) - 1) / (sqrt(3) + x)), then the Taylor
+# series, which converges fast there (|y|^2 <= 0.072 per term).
+def atan_unit(x) {
+    let tan15 = 2 - sqrt(3)
+    if x > tan15 {
+        let r3 = sqrt(3)
+        return MATH_PI / 6 + atan_series((x * r3 - 1) / (r3 + x))
+    }
+    return atan_series(x)
+}
+
+def atan_series(y) {
+    let y2 = y * y
+    let term = y
+    let total = y
+    let k = 1
+    while k < 60 {
+        term = 0 - term * y2
+        let next = total + term / (2 * k + 1)
+        if next == total {
+            return total
+        }
+        total = next
+        k = k + 1
+    }
+    return total
+}
+
+def atan_float(x) {
+    if x < 0 {
+        return 0 - atan_float(0 - x)
+    }
+    if x > 1 {
+        return MATH_PI / 2 - atan_unit(1 / x)
+    }
+    return atan_unit(x)
+}
+
+def asin_float(x) {
+    if x < -1 or x > 1 {
+        fail("asin needs a number from -1 to 1")
+    }
+    if x == 1 {
+        return MATH_PI / 2
+    }
+    if x == -1 {
+        return 0 - MATH_PI / 2
+    }
+    return atan_float(x / sqrt((1 - x) * (1 + x)))
+}
+
+def acos_float(x) {
+    if x < -1 or x > 1 {
+        fail("acos needs a number from -1 to 1")
+    }
+    return MATH_PI / 2 - asin_float(x)
+}
+
+def atan2_float(y, x) {
+    if x > 0 {
+        return atan_float(y / x)
+    }
+    if x < 0 {
+        if y >= 0 {
+            return atan_float(y / x) + MATH_PI
+        }
+        return atan_float(y / x) - MATH_PI
+    }
+    if y > 0 {
+        return MATH_PI / 2
+    }
+    if y < 0 {
+        return 0 - MATH_PI / 2
+    }
+    return 0.0
+}
+
+def exp_float(x) {
+    return float_pow(MATH_E, x)
+}
+
+# ln of a value > 0. For an exact value ln(num) - ln(den): the built-in
+# accepts arbitrarily large ints, so huge exact vals never overflow.
+def ln_value(v, name) {
+    if sign_of(v) <= 0 {
+        fail(name + " needs a number greater than zero")
+    }
+    if is_exact(v) {
+        if v.den == 1 {
+            return ln(v.num)
+        }
+        return ln(v.num) - ln(v.den)
+    }
+    return ln(v.value)
+}
+
+def log10_value(v) {
+    if sign_of(v) <= 0 {
+        fail("log10 needs a number greater than zero")
+    }
+    if is_exact(v) {
+        if v.den == 1 {
+            return log10(v.num)
+        }
+        return log10(v.num) - log10(v.den)
+    }
+    return log10(v.value)
+}
+
+def to_radians(x, options) {
+    if options.angle == "deg" {
+        return x * (MATH_PI / 180)
+    }
+    return x
+}
+
+def from_radians(x, options) {
+    if options.angle == "deg" {
+        return x * (180 / MATH_PI)
+    }
+    return x
+}
+
+# ================================================================ tokenizer
+
+def char_kind(c) {
+    if c in DIGIT_CHARS {
+        return "digit"
+    }
+    if c in LETTER_CHARS {
+        return "letter"
+    }
+    return "other"
+}
+
+# text -> [{kind, text, at}] ending with {kind: "end"}; see the design.
+export def tokenize(text) {
+    if type(text) != "string" {
+        fail("the expression must be text")
+    }
+    if trim(text) == "" {
+        fail("enter an expression")
+    }
+    if len(text) > MAX_LENGTH {
+        fail("expressions are at most " + str(MAX_LENGTH) + " characters")
+    }
+    let tokens = []
+    let i = 0
+    let n = len(text)
+    while i < n {
+        let c = text[i]
+        let kind = char_kind(c)
+        if c == " " or c == "\t" or c == "\n" {
+            i = i + 1
+        } else if kind == "digit" or (c == "." and i + 1 < n and char_kind(text[i + 1]) == "digit") {
+            let start = i
+            while i < n and char_kind(text[i]) == "digit" {
+                i = i + 1
+            }
+            if i < n and text[i] == "." {
+                i = i + 1
+                while i < n and char_kind(text[i]) == "digit" {
+                    i = i + 1
+                }
+            }
+            # An exponent only when digits follow: 2e3 is 2000, 2e is 2 then e.
+            if i < n and (text[i] == "e" or text[i] == "MATH_E") {
+                let j = i + 1
+                if j < n and (text[j] == "+" or text[j] == "-") {
+                    j = j + 1
+                }
+                if j < n and char_kind(text[j]) == "digit" {
+                    i = j
+                    while i < n and char_kind(text[i]) == "digit" {
+                        i = i + 1
+                    }
+                }
+            }
+            append(tokens, {kind: "number", text: text[start:i], at: start})
+        } else if kind == "letter" {
+            let start = i
+            while i < n and (char_kind(text[i]) == "letter" or char_kind(text[i]) == "digit") {
+                i = i + 1
+            }
+            append(tokens, {kind: "name", text: lower(text[start:i]), at: start})
+        } else if c in OPERATOR_CHARS {
+            append(tokens, {kind: "op", text: c, at: i})
+            i = i + 1
+        } else if c == "×" {
+            append(tokens, {kind: "op", text: "*", at: i})
+            i = i + 1
+        } else if c == "÷" {
+            append(tokens, {kind: "op", text: "/", at: i})
+            i = i + 1
+        } else if c == "−" {
+            append(tokens, {kind: "op", text: "-", at: i})
+            i = i + 1
+        } else if c == "π" {
+            append(tokens, {kind: "name", text: "pi", at: i})
+            i = i + 1
+        } else if c == "²" or c == "³" {
+            append(tokens, {kind: "op", text: "^", at: i})
+            let exponent = "2"
+            if c == "³" {
+                exponent = "3"
+            }
+            append(tokens, {kind: "number", text: exponent, at: i})
+            i = i + 1
+        } else {
+            fail("unexpected character \"" + c + "\" at position " + str(i))
+        }
+    }
+    append(tokens, {kind: "end", text: "", at: n})
+    return tokens
+}
+
+# A number token's text -> an exact value (mantissa digits over 10^decimals,
+# scaled by the exponent).
+def literal_value(text) {
+    let body = lower(text)
+    let power_of_ten = 0
+    if "e" in body {
+        let parts = split(body, "e")
+        body = parts[0]
+        let digits = parts[1]
+        let negative = false
+        if digits[0] == "-" or digits[0] == "+" {
+            negative = digits[0] == "-"
+            digits = digits[1:len(digits)]
+        }
+        power_of_ten = num(digits)
+        if power_of_ten > MAX_LITERAL_EXPONENT {
+            fail("the exponent in \"" + text + "\" is too large")
+        }
+        if negative {
+            power_of_ten = 0 - power_of_ten
+        }
+    }
+    let whole = body
+    let fraction = ""
+    if "." in body {
+        let parts = split(body, ".")
+        whole = parts[0]
+        fraction = parts[1]
+    }
+    let mantissa = num("0" + whole + fraction)
+    let value = exact(mantissa, pow(10, len(fraction)))
+    if power_of_ten >= 0 {
+        return exact(value.num * pow(10, power_of_ten), value.den)
+    }
+    return exact(value.num, value.den * pow(10, 0 - power_of_ten))
+}
+
+# ================================================================ parser
+
+def peek(state) {
+    return state.tokens[state.i]
+}
+
+def advance(state) {
+    let t = state.tokens[state.i]
+    state["i"] = state.i + 1
+    return t
+}
+
+def is_op(t, text) {
+    return t.kind == "op" and t.text == text
+}
+
+def starts_primary(t) {
+    return t.kind == "number" or t.kind == "name" or is_op(t, "(")
+}
+
+def describe(t) {
+    if t.kind == "end" {
+        return "end"
+    }
+    return "\"" + t.text + "\""
+}
+
+# Explains a token where an operator or the end was expected.
+def unexpected(t) {
+    if starts_primary(t) {
+        fail("missing operator before " + describe(t) + " at position " + str(t.at))
+    }
+    fail("unexpected " + describe(t) + " at position " + str(t.at))
+}
+
+# tokens -> AST (the grammar in docs/M8-MATH-DESIGN.md).
+export def parse(tokens) {
+    let state = {tokens: tokens, i: 0}
+    let tree = parse_sum(state)
+    let t = peek(state)
+    if t.kind != "end" {
+        unexpected(t)
+    }
+    return tree
+}
+
+def parse_sum(state) {
+    let left = parse_product(state)
+    while is_op(peek(state), "+") or is_op(peek(state), "-") {
+        let op = advance(state).text
+        left = {node: "bin", op: op, left: left, right: parse_product(state)}
+    }
+    return left
+}
+
+def parse_product(state) {
+    let left = parse_unary(state)
+    while is_op(peek(state), "*") or is_op(peek(state), "/") {
+        let op = advance(state).text
+        left = {node: "bin", op: op, left: left, right: parse_unary(state)}
+    }
+    return left
+}
+
+# Unary minus binds looser than ^, so -2^2 = -(2^2) = -4.
+def parse_unary(state) {
+    if is_op(peek(state), "-") {
+        advance(state)
+        return {node: "neg", arg: parse_unary(state)}
+    }
+    if is_op(peek(state), "+") {
+        advance(state)
+        return parse_unary(state)
+    }
+    return parse_power(state)
+}
+
+# Right-associative: the exponent is a whole unary, so 2^3^2 = 2^(3^2) and
+# 2^-1 works.
+def parse_power(state) {
+    let base = parse_postfix(state)
+    if is_op(peek(state), "^") {
+        advance(state)
+        return {node: "bin", op: "^", left: base, right: parse_unary(state)}
+    }
+    return base
+}
+
+def parse_postfix(state) {
+    let value = parse_primary(state)
+    while is_op(peek(state), "!") {
+        advance(state)
+        value = {node: "fact", arg: value}
+    }
+    return value
+}
+
+def parse_primary(state) {
+    let t = peek(state)
+    if t.kind == "end" {
+        fail("unexpected end of the expression")
+    }
+    if t.kind == "number" {
+        advance(state)
+        return {node: "num", value: literal_value(t.text)}
+    }
+    if t.kind == "name" {
+        advance(state)
+        if is_op(peek(state), "(") {
+            advance(state)
+            let arguments = [parse_sum(state)]
+            while is_op(peek(state), ",") {
+                advance(state)
+                append(arguments, parse_sum(state))
+            }
+            expect_close(state)
+            return {node: "call", name: t.text, args: arguments, at: t.at}
+        }
+        return {node: "name", name: t.text, at: t.at}
+    }
+    if is_op(t, "(") {
+        advance(state)
+        let inner = parse_sum(state)
+        expect_close(state)
+        return inner
+    }
+    fail("unexpected " + describe(t) + " at position " + str(t.at))
+}
+
+def expect_close(state) {
+    let t = peek(state)
+    if is_op(t, ")") {
+        advance(state)
+        return true
+    }
+    if starts_primary(t) {
+        fail("missing operator before " + describe(t) + " at position " + str(t.at))
+    }
+    fail("missing \")\" at position " + str(t.at))
+}
+
+# ================================================================ evaluation
+
+let FUNCTION_ARITY = {
+    sqrt: [1, 1], root: [2, 2], abs: [1, 1], floor: [1, 1], ceil: [1, 1], round: [1, 2],
+    mod: [2, 2], min: [1, 1000], max: [1, 1000], gcd: [2, 2], lcm: [2, 2], ncr: [2, 2], npr: [2, 2],
+    sin: [1, 1], cos: [1, 1], tan: [1, 1], asin: [1, 1], acos: [1, 1], atan: [1, 1], atan2: [2, 2],
+    sinh: [1, 1], cosh: [1, 1], tanh: [1, 1], exp: [1, 1], ln: [1, 1], log10: [1, 1], log2: [1, 1],
+    log: [2, 2]
+}
+
+def check_arity(name, count) {
+    let range_of = FUNCTION_ARITY[name]
+    if count < range_of[0] or count > range_of[1] {
+        let plural = "s"
+        if range_of[0] == 1 and range_of[1] == 1 {
+            plural = ""
+        }
+        if range_of[0] == range_of[1] {
+            fail(name + " takes " + str(range_of[0]) + " argument" + plural + ", got " + str(count))
+        }
+        if range_of[1] == 1000 {
+            fail(name + " takes at least " + str(range_of[0]) + " argument, got " + str(count))
+        }
+        fail(name + " takes " + str(range_of[0]) + " or " + str(range_of[1]) + " arguments, got " + str(count))
+    }
+}
+
+def whole_number(v, name) {
+    if not is_integer(v) {
+        fail(name + " needs whole numbers")
+    }
+    return v.num
+}
+
+def factorial(v) {
+    if not is_integer(v) or v.num < 0 or v.num > MAX_FACTORIAL {
+        fail("factorial needs a whole number from 0 to " + str(MAX_FACTORIAL))
+    }
+    let total = 1
+    for k = 2 to v.num {
+        total = total * k
+    }
+    return exact(total, 1)
+}
+
+def floor_value(v) {
+    if is_exact(v) {
+        return exact(v.num // v.den, 1)
+    }
+    return exact(floor(v.value), 1)
+}
+
+def ceil_value(v) {
+    if is_exact(v) {
+        return exact(0 - ((0 - v.num) // v.den), 1)
+    }
+    return exact(ceil(v.value), 1)
+}
+
+# Half-up rounding to `places` decimals, exact (a float is first converted
+# to its exact binary value).
+def round_value(v, places) {
+    let r = v
+    if not is_exact(r) {
+        r = float_to_exact(r.value)
+    }
+    let scale = pow(10, places)
+    return exact(round_half_up(r.num * scale, r.den), scale)
+}
+
+def sqrt_value(v) {
+    if sign_of(v) < 0 {
+        fail("sqrt of a negative number is not a real number")
+    }
+    if is_exact(v) {
+        let root = exact_root(v, 2)
+        if "num" in root {
+            return root
+        }
+    }
+    return float_value(sqrt(to_float(v)))
+}
+
+def call_function(name, vals, options, at) {
+    if not (name in FUNCTION_ARITY) {
+        fail("unknown function \"" + name + "\" at position " + str(at))
+    }
+    check_arity(name, len(vals))
+    let a = vals[0]
+    if name == "sqrt" {
+        return sqrt_value(a)
+    }
+    if name == "root" {
+        let k = whole_number(vals[1], "root")
+        if k < 1 {
+            fail("root needs a positive whole-number index")
+        }
+        return power(a, exact(1, k))
+    }
+    if name == "abs" {
+        if sign_of(a) < 0 {
+            return negate(a)
+        }
+        return a
+    }
+    if name == "floor" {
+        return floor_value(a)
+    }
+    if name == "ceil" {
+        return ceil_value(a)
+    }
+    if name == "round" {
+        let places = 0
+        if len(vals) == 2 {
+            places = whole_number(vals[1], "round")
+            if places < 0 {
+                fail("round needs 0 or more decimal places")
+            }
+        }
+        return round_value(a, places)
+    }
+    if name == "mod" {
+        let b = vals[1]
+        return sub(a, mul(b, floor_value(divide(a, b))))
+    }
+    if name == "min" or name == "max" {
+        let best = {v: a}
+        for v in vals {
+            let c = compare(v, best.v)
+            if (name == "min" and c < 0) or (name == "max" and c > 0) {
+                best["v"] = v
+            }
+        }
+        return best.v
+    }
+    if name == "gcd" or name == "lcm" {
+        let x = whole_number(a, name)
+        let y = whole_number(vals[1], name)
+        let g = gcd(x, y)
+        if name == "gcd" {
+            return exact(g, 1)
+        }
+        if g == 0 {
+            return exact(0, 1)
+        }
+        return exact(abs(x * y) // g, 1)
+    }
+    if name == "ncr" or name == "npr" {
+        let total = whole_number(a, name)
+        let pick = whole_number(vals[1], name)
+        if pick < 0 or total < 0 or pick > total {
+            fail(name + " needs whole numbers with 0 <= k <= n")
+        }
+        let result = 1
+        for k = 0 to pick - 1 {
+            result = result * (total - k)
+        }
+        if name == "ncr" {
+            let divisor = 1
+            for k = 2 to pick {
+                divisor = divisor * k
+            }
+            result = result // divisor
+        }
+        return exact(result, 1)
+    }
+    # ---- transcendentals: always float
+    if name == "sin" {
+        return float_value(sin(to_radians(to_float(a), options)))
+    }
+    if name == "cos" {
+        return float_value(cos(to_radians(to_float(a), options)))
+    }
+    if name == "tan" {
+        return float_value(tan(to_radians(to_float(a), options)))
+    }
+    if name == "asin" {
+        return float_value(from_radians(asin_float(to_float(a)), options))
+    }
+    if name == "acos" {
+        return float_value(from_radians(acos_float(to_float(a)), options))
+    }
+    if name == "atan" {
+        return float_value(from_radians(atan_float(to_float(a)), options))
+    }
+    if name == "atan2" {
+        return float_value(from_radians(atan2_float(to_float(a), to_float(vals[1])), options))
+    }
+    if name == "exp" {
+        return float_value(exp_float(to_float(a)))
+    }
+    if name == "sinh" or name == "cosh" or name == "tanh" {
+        let up = exp_float(to_float(a))
+        let down = exp_float(0 - to_float(a))
+        if name == "sinh" {
+            return float_value((up - down) / 2)
+        }
+        if name == "cosh" {
+            return float_value((up + down) / 2)
+        }
+        return float_value((up - down) / (up + down))
+    }
+    if name == "ln" {
+        return float_value(ln_value(a, "ln"))
+    }
+    if name == "log10" {
+        return float_value(log10_value(a))
+    }
+    if name == "log2" {
+        return float_value(ln_value(a, "log2") / ln(2))
+    }
+    if name == "log" {
+        let base = vals[1]
+        let ln_base = ln_value(base, "log base")
+        if ln_base == 0 {
+            fail("log base must not be 1")
+        }
+        return float_value(ln_value(a, "log") / ln_base)
+    }
+    fail("unknown function \"" + name + "\" at position " + str(at))
+}
+
+def name_value(node) {
+    if node.name == "pi" {
+        return float_value(MATH_PI)
+    }
+    if node.name == "e" {
+        return float_value(MATH_E)
+    }
+    if node.name in FUNCTION_ARITY {
+        fail(node.name + " needs parentheses, e.g. " + node.name + "(2)")
+    }
+    fail("unknown name \"" + node.name + "\" at position " + str(node.at))
+}
+
+# AST -> value. options: {angle: "rad" | "deg"}.
+export def eval_ast(tree, options) {
+    let kind = tree.node
+    if kind == "num" {
+        return tree.value
+    }
+    if kind == "name" {
+        return name_value(tree)
+    }
+    if kind == "neg" {
+        return negate(eval_ast(tree.arg, options))
+    }
+    if kind == "fact" {
+        return factorial(eval_ast(tree.arg, options))
+    }
+    if kind == "call" {
+        let vals = []
+        for argument in tree.args {
+            append(vals, eval_ast(argument, options))
+        }
+        return call_function(tree.name, vals, options, tree.at)
+    }
+    let left = eval_ast(tree.left, options)
+    let right = eval_ast(tree.right, options)
+    if tree.op == "+" {
+        return add(left, right)
+    }
+    if tree.op == "-" {
+        return sub(left, right)
+    }
+    if tree.op == "*" {
+        return mul(left, right)
+    }
+    if tree.op == "/" {
+        return divide(left, right)
+    }
+    return power(left, right)
+}
+
+# text -> {value, display, exact_text}. options: {angle, digits} (both optional).
+export def evaluate(text, options) {
+    let settings = {angle: "rad", digits: DEFAULT_DIGITS}
+    if type(options) == "dict" {
+        if "angle" in options {
+            settings["angle"] = options.angle
+        }
+        if "digits" in options {
+            settings["digits"] = options.digits
+        }
+    }
+    if settings.angle != "rad" and settings.angle != "deg" {
+        fail("angle must be rad or deg")
+    }
+    let value = eval_ast(parse(tokenize(text)), settings)
+    return {value: value, display: display(value, settings.digits), exact_text: exact_text(value)}
+}

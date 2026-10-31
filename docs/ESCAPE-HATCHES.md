@@ -256,6 +256,16 @@ rediscovers them.
   This matches Python's `Decimal(float)` digit for digit.
 - **Precision ceiling:** transcendentals are binary doubles (about 15–17 significant digits),
   which is why the display uses 12.
+- **`PI` and `E` don't exist inside imported modules** (found while implementing). They're
+  globals of the top-level script only. A module function can call built-ins like `sqrt`, but
+  `PI` is "undefined name". `scientific.nova` defines `MATH_PI = 3.141592653589793` and
+  `MATH_E = 2.718281828459045`, verified bit-identical to the built-ins.
+- **Evaluator cost** (measured after implementation; unchecked core not needed):
+  - typical expressions take 2–4 ms;
+  - `1000!` takes 3.4 ms and `2^4096` 1.2 ms;
+  - cost grows about 0.06 ms per character, so a 479-character expression takes about 28 ms.
+  The 500-character limit therefore bounds the worst case at roughly 30–40 ms, inside the 70 ms
+  Math-tab target.
 
 ## Known approximations
 

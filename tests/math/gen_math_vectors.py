@@ -107,7 +107,8 @@ def exact_case(text, value, note=""):
 
 
 def float_case(text, value, angle="rad", note=""):
-    return {"text": text, "angle": angle, "kind": "float", "value": repr(float(value)),
+    # A JSON number, not repr text: NovaLang's num() can't read exponents, json.loads can.
+    return {"text": text, "angle": angle, "kind": "float", "value": float(value),
             "display": display_float(float(value)), "note": note}
 
 

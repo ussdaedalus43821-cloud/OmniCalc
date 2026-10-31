@@ -35,6 +35,10 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
     variable, parameter or function names.
   - There is no hoisting at top level: a function must be defined before top-level code calls
     it. Calls from inside function bodies can go to functions defined later.
+  - **`PI` and `E` are undefined inside imported modules**; only the top-level script has them.
+    Use literals (`3.141592653589793`, `2.718281828459045`), which are bit-identical.
+  - **`log` is the stderr logger, not a logarithm,** and there's no `exp`, `asin`, `acos` or
+    `atan`. See `src/math/scientific.nova` for NovaLang versions.
   - **`for i = a to b` is INCLUSIVE of `b`** (verified; `Nova_Lang/README.md` wrongly says
     "counts 0..9" for `0 to 10`). `range(n)` is exclusive. To visit `n` items, write
     `for i = 0 to n - 1` or `for i = 1 to n`.
@@ -471,7 +475,8 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
 - vendor/Nova_Lang — pinned submodule (read-only)
 - src/host/nova_runtime.py — loads the pinned interpreter, startup version + commit assertion
 - src/core/numbers.nova, money.nova, rates.nova, dates.nova — foundation (M0, numbers.nova in M1)
-- src/core/math — scientific, units, algebra hooks
+- src/math/scientific.nova — expression evaluator, exact rationals, float functions, display (M8)
+- src/math/units.json — exact unit table (M8); units.nova, datetime.nova next
 - src/finance/tvm.nova — PV/FV/PMT/N/rate (M1)
 - src/finance/cashflow.nova — NPV, IRR, payback, from_schedule (M3)
 - src/finance/amortization.nova — schedules, extra payments, biweekly (M2); schedule_table (pre-M5)
@@ -565,8 +570,20 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
   - Tests: `tests/finance/investments_test.nova` (vectors: `gen_investments_vectors.py`) and
     `tests/app/investments_screen_test.nova`, which diffs a 20-position portfolio against
     `tests/app/vectors/portfolio_20.json` (`gen_portfolio_vectors.py`).
-- **M8 — decide after using the app for a week:** the ordinary math engine (scientific, units,
-  date math), persistence, or whatever the week shows is missing.
+- **M7** ✅ done, reviewed; merged to `main` (PR #2, `ab8dd8b`).
+- **M8 — math engine.** 🚧 in progress. The API is approved in `docs/M8-MATH-DESIGN.md`.
+  - **Done, awaiting review:** `src/math/scientific.nova`, an exact-first evaluator with a
+    hand-written tokenizer, recursive descent and its own display. `tests/math/scientific_test.nova`
+    has 112 checks against `tests/math/gen_math_vectors.py`.
+  - **Next:** `units.nova` (table: `src/math/units.json`, vectors already generated),
+    `datetime.nova`, and the Math tab.
+  - **Grammar conventions (approved, each pinned by a test):**
+    - `-2^2 = -4`;
+    - `^` is right-associative;
+    - no implicit multiplication (`2pi` is an error);
+    - 12 significant figures, with scientific notation at an exponent ≥ 12 or ≤ −7.
+  - **Mutation-tested:** left-associative `^`, implicit multiplication, Excel-style unary minus,
+    half-even rounding and float literals are each caught by named failing cases.
 - **Later — compound interest** (`investments`).
 - **Later — Scientific + units** (`core/math`).
 - **Later — the full Tkinter host:** screens with formula/assumptions, CSV export, a terminal debug
