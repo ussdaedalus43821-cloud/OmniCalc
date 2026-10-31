@@ -1,75 +1,43 @@
-# NovaLang — Open Questions for OmniCalc (Phase 0)
+# NovaLang — Questions for OmniCalc (Phase 0) — ALL RESOLVED
 
-Source inspected: `ussdaedalus43821-cloud/Nova_Lang`, branch `claude/bold-dirac-8owccb`
-(HEAD `02eabdb`). OmniCalc contains only `README.md`; there is no `docs/NOVALANG.md`
-in either repo. All NovaLang facts below cite files in the Nova_Lang repo.
+The facts below come from `ussdaedalus43821-cloud/Nova_Lang` at commit `02eabdb`
+(branch `claude/bold-dirac-8owccb`). The answers are from the project owner's decision set of
+2026-10-31, called **"Decisions 2026-10-31"** below. The binding rules derived from them are in
+`CLAUDE.md`.
 
-## What is established
+## What Phase 0 established
 
 | Topic | Finding | Source |
 |---|---|---|
-| Version | v1.1.0, set only inside the interpreter (`__version__ = "1.1.0"`) | `novalang.py:74`, `README.md` "Current release", `CHANGELOG.md` `[1.1.0]` |
-| Implementation | Tree-walking interpreter in Python 3.7+; no compiler, no build step | `README.md` "Quick start", "Self-hosting" |
-| Run | `python3 novalang.py file.nova` (also `--bootstrap`) | `README.md` "Quick start" |
-| Tests | No test framework; `.nova` self-check scripts plus a direct-vs-`--bootstrap` diff | `CONTRIBUTING.md` "Testing a change" |
-| Package manager | None. Zero dependencies; modules are file-path `import "./x.nova"` | `README.md` "Quick start", "Language syntax" (modules) |
-| UI | None in the language. UI only exists via a Python host (pygame examples) | `README.md` "Embedding", `examples/ecs_demo.py` |
-| Numbers | One `number` type: Python `int` (arbitrary precision) or binary `float` | `novalang.py:418-431`; verified: `0.1 + 0.2` → `0.30000000000000004` |
-| Rounding | `round()` is Python's (half-to-even, float-based): `round(2.5)` → `2`, `round(2.675, 2)` → `2.67` | `novalang.py:1910-1914`; verified |
-| Math | `abs round floor ceil sqrt pow sin cos tan ln log10 PI E min max sum`; no `**`, no bitwise ops | `README.md` "Standard library"; `CHANGELOG.md` `[1.1.0]` (no bitwise) |
-| Dates | `time() now() format_time(t, fmt)` only; no date parsing or date arithmetic | `README.md` "Standard library" |
-| CSV | No CSV support. `split()` doesn't handle quoted fields | `README.md` "Standard library"; verified |
-| Decimal | None built in. `decimal` isn't on the `python.import` allowlist (`datetime` is) | `README.md` "Security" |
+| Version | v1.1.0 (`__version__ = "1.1.0"`) | `novalang.py:74`, `README.md` "Current release" |
+| Implementation | Tree-walking interpreter on CPython 3.7+. No compiler, no build step | `README.md` "Quick start", "Self-hosting" |
+| Run | `python3 novalang.py file.nova` (`--bootstrap` for the self-hosted engine) | `README.md` "Quick start" |
+| Tests | No framework. `.nova` self-check scripts plus a direct-vs-bootstrap diff | `CONTRIBUTING.md` "Testing a change" |
+| Package manager | None. Modules are imported by file path | `README.md` "Language syntax" |
+| UI | None in the language. Only through a Python host | `README.md` "Embedding NovaLang in Python" |
+| Numbers | `int` (arbitrary precision) or binary `float` | `novalang.py:418-431`. Verified: `0.1 + 0.2` → `0.30000000000000004` |
+| Rounding | `round()` is Python's half-even float rounding | `novalang.py:1910-1914`. Verified: `round(2.5)` → `2` |
+| Math | `abs round floor ceil sqrt pow sin cos tan ln log10 PI E min max sum`. No `**` (verified parse error), no bitwise ops | `README.md` "Standard library", `CHANGELOG.md` `[1.1.0]` |
+| Dates | `time() now() format_time()` only | `README.md` "Standard library" |
+| CSV | None. `split()` is not quote-aware (verified) | `README.md` "Standard library" |
+| Formatter/linter | None. The only CLI flag is `--bootstrap` | `novalang.py:4154` |
 
-## Resolved by CLAUDE.md
-- Q4 (partial): money must use decimal arithmetic, never floats. Still open: implementation
-  (fixed-point ints in NovaLang vs. host `decimal`) and rounding rule.
-- Q6: CSV export is required on every result screen.
-- Q10 (partial): module layout is fixed by CLAUDE.md "Architecture"; v1 milestone order still open.
-- New: PDF export and local storage are required; both need host adapters or JSON-on-filesystem.
+## Resolutions (Decisions 2026-10-31)
 
-## Questions — please answer before any app code
+| # | Question | Status | Decision |
+|---|---|---|---|
+| 1 | Target platforms | **Resolved** | Python-hosted desktop app. Web/mobile out of scope for v1. |
+| 2 | How much is NovaLang | **Resolved** | All calculation logic in NovaLang. The Python host handles only UI, file I/O, CSV, datetime parsing/formatting and process launch. |
+| 3 | UI toolkit | **Resolved** | Tkinter. No pygame. A terminal harness exists for debugging only, not as a product mode. |
+| 4 | Money / decimal / rounding | **Resolved** | Integer minor units with a currency scale, end to end. Rates are integer micro-units (1e-6 of a fraction: 6.5% = `65000`). Periodic rate = annual / periods with the remainder carried, not pre-rounded. Round half-up only at cash-flow boundaries (per period) and at display. Iterative solvers may use floats internally, but the objective is evaluated in minor units and verified at minor-unit precision before display. No Python `decimal`. |
+| 5 | Dates | **Resolved** | Hybrid. Python parses/formats, supplies "today", and passes `{y, m, d, serial}`. NovaLang does all date math on integer serial day numbers: add-months with end-of-month clamping, 30/360, actual/365, actual/actual, schedule generation. |
+| 6 | CSV | **Resolved** | Export only in v1, using Python's `csv` module in the host. NovaLang returns rows as arrays of integers plus a scale. No NovaLang CSV parser. |
+| 7 | Pinning | **Resolved** | Git submodule at `02eabdb`, plus a startup assertion that the version is `1.1.0`. |
+| 8 | `--bootstrap` parity | **Resolved** | Separate nightly CI job. Not required locally, not a correctness gate. |
+| 9 | Test convention | **Resolved** | Keep the `check(label, actual, expected)` style. Each test file ends with a `TESTS_OK <n>` sentinel that doesn't call `len()` on a number. A Python runner fails on non-zero exit, a missing sentinel, or a check-count mismatch. Don't patch the submodule; report the upstream bug separately. |
+| 10 | v1 scope | **Resolved** | Scientific, units, TVM, amortization, compound interest, amortization CSV export. No tax in v1. |
+| 11 | Performance | **Resolved** | NovaLang everywhere except documented heavy jobs. UI-path budget: 100 ms / about 10k interpreter steps. Anything over that moves to Python behind the same interface, with a parity test against the NovaLang version. |
 
-1. **Target platforms.** NovaLang runs only where CPython runs. It has no web/iOS/Android
-   target. Is OmniCalc a desktop/CLI app (Python host + NovaLang), or did you expect
-   web/mobile? If web/mobile, which host (e.g. Pyodide in the browser)? This hasn't been
-   tested and isn't documented.
-2. **How much is NovaLang?** Options:
-   (a) all logic in NovaLang, with a thin Python host for UI/IO;
-   (b) a pure NovaLang CLI/REPL app (no GUI);
-   (c) something else.
-   Which one?
-3. **UI toolkit.** If there's a GUI, which Python toolkit should host it (Tkinter is stdlib
-   and needs no dependencies; pygame is what the repo's examples use)? Or should it be
-   terminal-only?
-4. **Money and decimal precision.** NovaLang has only binary floats. Pick one:
-   (a) fixed-point integer arithmetic in NovaLang (e.g. cents or 10⁻⁸ units; ints are
-   arbitrary precision);
-   (b) the host exposes Python `decimal` via `Nova.expose_module(...)` / `expose()`;
-   (c) accept float with display rounding (not recommended for finance).
-   And what rounding rule: half-up, half-even (banker's), or one per calculator?
-5. **Dates.** Loan schedules and date math need date parsing and day counts. Should I
-   write a pure-NovaLang date library (civil-date ↔ day-number, add months, day-count
-   conventions), or use `python.import("datetime")`? The latter only works when embedded,
-   not with plain `novalang.py`.
-6. **CSV.** Is CSV import/export needed in v1? If so, should it be a NovaLang CSV parser
-   (RFC 4180 quoting) on top of `read`/`write`, or should the Python host's `csv` module
-   pass rows in?
-7. **Pinning NovaLang.** No package manager exists. How should OmniCalc pin v1.1.0:
-   a git submodule at commit `02eabdb`, a vendored copy of `novalang.py` (+ `novalang.nova`),
-   or a documented sibling checkout?
-8. **`--bootstrap` parity.** Must OmniCalc's NovaLang code also pass under the self-hosted
-   interpreter (`--bootstrap`), as Nova_Lang's own examples do, or is the host engine enough?
-9. **Test convention.** Is the repo's `check(label, actual, expected)` self-check script
-   pattern (`examples/stdlib_full_test.nova`), run by a shell/Python runner, acceptable as
-   OmniCalc's test framework?
-10. **Scope of v1.** Which calculators come first? Examples: arithmetic/scientific,
-    unit conversion, loan/amortization, compound interest/savings, budgeting, NPV/IRR,
-    tax (which jurisdiction?).
-11. **Performance.** Interpreter throughput is about 162k simple loop iterations/sec
-    (`README.md` "ECS & particle engine"). Is that acceptable for heavy jobs (e.g. Monte
-    Carlo retirement sims with 10k+ runs), or should those run in the Python host?
-
-## Minor upstream issue noticed (not blocking)
-`examples/stdlib_full_test.nova` failure path calls `len(state["checks"])`, but
-`state["checks"]` is a number, so the report itself would error if any check failed.
+## Upstream issue to report (do not patch the submodule)
+In `Nova_Lang/examples/stdlib_full_test.nova`, the failure-report branch calls
+`len(state["checks"])` on a number, so the summary errors if any check fails.
