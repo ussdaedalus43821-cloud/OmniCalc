@@ -1,19 +1,20 @@
 # src/core/dates.nova - calendar math on integer serial day numbers.
 #
 # A date is {y, m, d, serial}, where serial counts days from 1970-01-01
-# (serial 0) in the proleptic Gregorian calendar. Python's equivalent is
-# date.toordinal() - 719163. The host parses and formats date strings and
+# (serial 0) in the proleptic Gregorian calendar. The host converts with
+# serial = date.toordinal() - 719163 (Python's ordinal 719163 is 1970-01-01).
+# That identity is the host contract: do not change the epoch or the
+# constant, or every stored and host-supplied serial shifts. The host parses and formats date strings and
 # supplies "today" as this struct; every calculation lives here.
 #
 # Conversions use Howard Hinnant's days_from_civil / civil_from_days
 # algorithms, which need floor division - exactly what NovaLang's `//`
 # does (Nova_Lang/novalang.py:3266-3269, "rounds towards negative infinity").
 
+import "./numbers.nova" as numbers
+
 def require_whole(value, what) {
-    if type(value) != "number" or floor(value) != value {
-        throw("dates: " + what + " must be a whole number, got " + str(value))
-    }
-    return floor(value)
+    return numbers.require_whole(value, what, "dates")
 }
 
 export def is_leap_year(y) {

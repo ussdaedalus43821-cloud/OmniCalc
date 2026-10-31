@@ -1,0 +1,30 @@
+# src/core/numbers.nova - the shared whole-number guard for every module.
+#
+# NovaLang has one `number` type for ints and floats (Nova_Lang/novalang.py:
+# 418-431), and floats can be NaN or infinite: num() turns a long decimal
+# string into inf, and json.loads("NaN") returns nan. Calling floor() on
+# either crashes the interpreter with a raw Python ValueError/OverflowError
+# instead of a catchable NovaLang error, so non-finite values must be
+# rejected *before* floor() is reached. `or` short-circuits
+# (Nova_Lang/CHANGELOG.md, Stage 3), which makes the order below load-bearing.
+
+export def is_finite(value) {
+    if type(value) != "number" {
+        return false
+    }
+    # NaN is the only value not equal to itself; inf - inf is NaN.
+    return value == value and value - value == 0
+}
+
+export def is_whole(value) {
+    return is_finite(value) and floor(value) == value
+}
+
+# Returns value as an int (a whole-valued float is normalized with floor()),
+# or throws "<owner>: <what> must be a whole number, got <value>".
+export def require_whole(value, what, owner) {
+    if not is_whole(value) {
+        throw(owner + ": " + what + " must be a whole number, got " + str(value))
+    }
+    return floor(value)
+}

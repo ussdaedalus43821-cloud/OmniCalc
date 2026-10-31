@@ -7,22 +7,21 @@
 # formatting job is minor + scale + currency -> string.
 #
 # NovaLang has one `number` type covering ints and floats
-# (Nova_Lang/novalang.py:418-431). A fractional value is rejected; a
-# whole-valued float is normalized to an int with floor(). Only + - * // %
+# (Nova_Lang/novalang.py:418-431). A fractional, NaN or infinite value is
+# rejected (src/core/numbers.nova); a whole-valued float is normalized to an
+# int with floor(). Only + - * // %
 # are used, never `/`, which returns a float for inexact division
 # (Nova_Lang/novalang.py:3258-3265).
 #
-# Rounding happens only in round_half_up(), which multiply_rate() applies
-# once to its exact result. That is the cash-flow boundary; intermediate
-# arithmetic is never rounded.
+# Rounding happens only in round_half_up(). multiply_rate_exact() is the
+# unrounded product, for solvers and any arithmetic that continues;
+# multiply_rate() rounds it once, for a single cash flow.
 
+import "./numbers.nova" as numbers
 import "./rates.nova" as rates
 
 def require_whole(value, what) {
-    if type(value) != "number" or floor(value) != value {
-        throw("money: " + what + " must be a whole number, got " + str(value))
-    }
-    return floor(value)
+    return numbers.require_whole(value, what, "money")
 }
 
 def describe(value) {
@@ -46,6 +45,12 @@ def require_same_unit(a, b, operation) {
 
 def with_minor(template, minor) {
     return {minor: minor, scale: template.scale, currency: template.currency}
+}
+
+# Throws unless a and b are money values with the same scale and currency.
+export def check_same_unit(a, b) {
+    require_same_unit(a, b, "check_same_unit")
+    return true
 }
 
 export def make(minor, scale, currency) {
@@ -109,10 +114,18 @@ export def round_half_up(numerator, denominator) {
     return 0 - ((2 * (0 - n) + d) // (2 * d))
 }
 
-# a * rate, computed exactly and rounded half-up once. Call it once per
-# cash flow (e.g. one period's interest), not on partial results.
-export def multiply_rate(a, rate) {
+# a * rate with no rounding: {num, den, scale, currency}, meaning num / den
+# minor units. Both operands are integers, so this is exact. Solvers
+# evaluate residuals in this form, never in rounded minor units.
+export def multiply_rate_exact(a, rate) {
     require_money(a)
     rates.check_rate(rate)
-    return with_minor(a, round_half_up(a.minor * rate.num, rate.den * rates.MICRO))
+    return {num: a.minor * rate.num, den: rate.den * rates.MICRO, scale: a.scale, currency: a.currency}
+}
+
+# multiply_rate_exact() rounded half-up once, for one cash flow (e.g. one
+# period's interest). Never feed its result into a solver's residual.
+export def multiply_rate(a, rate) {
+    let exact = multiply_rate_exact(a, rate)
+    return with_minor(a, round_half_up(exact.num, exact.den))
 }

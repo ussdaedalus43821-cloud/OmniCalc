@@ -21,3 +21,26 @@ An entry missing any field is invalid. An escape hatch that isn't listed here is
 ## Entries
 
 _None._
+
+## Decisions to keep in NovaLang (no escape hatch)
+
+These were checked against the budget and stay in NovaLang. Re-measure if inputs grow.
+
+### TVM rate solve — `src/finance/tvm.nova :: rate` (M1, 2026-10-31)
+- Measured: 10 solves each, Python 3.13, direct interpreter (not `--bootstrap`).
+
+  | Case | Per solve |
+  |---|---|
+  | 360 periods @ 6.5% | 6.0 ms |
+  | 480 @ 24% | 7.2 ms |
+  | 1,200 @ 3% | 15.1 ms |
+  | 12 @ 0.5% | 4.1 ms |
+
+  For comparison, `pmt` takes about 0.6–0.8 ms per call.
+- Why it's fast: bisection takes about 40–50 iterations. Each iteration is two exact
+  `pow()` calls on Python ints, so the step count stays low even though the ints have
+  thousands of digits.
+- Precision: exact rational residual. The result is within 1e-12 per period, and it is
+  checked by re-deriving pmt/fv to within one minor unit.
+- Decision: well under the 100 ms budget, with no precision gain from moving it to
+  Python. It stays in NovaLang.

@@ -23,10 +23,16 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
   - `round()` is float half-even; never use it for money.
   - `/` returns a float when the division is inexact (`novalang.py:3258-3265`). Integer code uses
     only `+ - * // %`; `//` floors (`novalang.py:3266-3269`).
-  - `type()` reports `"number"` for both ints and floats, so whole-number checks use
-    `floor(x) == x`.
-  - Built-in names (`min`, `max`, `sum`, `copy`, `remove`, `set`, `get`, ...) and keywords (`to`,
-    `step`, `in`, `with`, `as`, `delete`) can't be used as variable or function names.
+  - `type()` reports `"number"` for both ints and floats. Floats can be NaN or inf (`num()` of a
+    long decimal string returns `inf`, and `json.loads("NaN")` returns `nan`), and `floor()` on
+    either **crashes the interpreter** with a raw Python error. All whole-number checks go
+    through `src/core/numbers.nova` (`is_finite`, `is_whole`, `require_whole`), which rejects
+    non-finite values before calling `floor()`.
+  - Built-in names (`min`, `max`, `sum`, `num`, `values`, `keys`, `copy`, `remove`, `set`,
+    `get`, ...) and keywords (`to`, `step`, `in`, `with`, `as`, `delete`) can't be used as
+    variable, parameter or function names.
+  - There is no hoisting at top level: a function must be defined before top-level code calls
+    it. Calls from inside function bodies can go to functions defined later.
 - If NovaLang cannot express a platform feature, isolate that feature behind a thin adapter and document it.
 - Prefer NovaLang for domain logic: math, finance, validation, and numeric formatting decisions
   (scale, rounding). The host turns the result into display strings.
@@ -53,10 +59,50 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
   No Python `decimal`.
 - **Rates** are integer micro-units of a fraction (1e-6): 6.5% = `65000`. A periodic rate is
   annual / periods with the remainder carried, never pre-rounded.
-- **Rounding** is half-up, and only at cash-flow boundaries (each amortization period) and at
-  display. Never round intermediate arithmetic.
-- **Iterative solvers** (IRR, solve-for-rate) may use floats internally, but the objective is
-  evaluated in minor units, and the result is verified at minor-unit precision before display.
+- **Rounding** is half-up (halves away from zero), and only at cash-flow boundaries (each
+  amortization period) and at display. Never round intermediate arithmetic.
+- **Two rate-multiplication primitives** (`src/core/money.nova`):
+  - `multiply_rate_exact(a, rate)` returns `{num, den, scale, currency}`, meaning `num / den`
+    minor units, unrounded.
+  - `multiply_rate(a, rate)` is that same value rounded half-up once. Use it for **one cash
+    flow**, never inside a solver.
+
+## Solver rules
+- **Sign convention.** Cash received is positive and cash paid out is negative. A loan you take
+  out has `pv > 0` and `pmt < 0`; a savings plan has `pmt < 0` and `fv > 0`.
+- **Period convention.** Payments fall at the end of each period. `rate` is always the rate
+  **per period**; converting from annual is the caller's job (`rates.per_period(rates.annual(m),
+  12)`). `n` is a whole number of periods.
+- **Residuals are never evaluated in rounded minor units.** Rounding would make them
+  step functions of the rate. Solvers use exact rational arithmetic instead:
+  - `multiply_rate_exact` for single-period products;
+  - integer compounding factors `A = (D + num)^n`, `B = D^n`, where `pow()` on ints is exact;
+  - floats only where exact rationals are impractical, i.e. the logarithms in `n`.
+  Only the final answer is rounded.
+- **`tvm.fv` / `pv` / `pmt`:** exact closed forms, rounded half-up once, to a minor unit.
+- **`tvm.n`:** closed form through logarithms, in floats. At a zero rate it's `-(pv + fv) / pmt`.
+  - Returns `{exact, periods}`. `exact` is the real-valued solution and is not rounded.
+    `periods` is `ceil(exact)`, except that an overshoot under 1e-4 of a period is ignored,
+    because that's how a target rounded to a minor unit shows up.
+  - No summation fallback: when the closed form has no positive solution, no `n` exists, and
+    `n` throws.
+- **`tvm.rate`:** bisection on the exact residual's sign.
+  - Bracket: walk outward from 0 and stop at the first sign change. Upward the candidates are
+    0.1%/period doubling to about 1,048,576%; downward they're -0.1% doubling to -51.2%, then
+    -75%, -90%, -99%, -99.9%, -99.99%. The positive side is tried first, so with more than
+    one root the smallest positive one wins.
+  - Bisection runs over a power-of-two denominator and stops at a width of 1e-12 per period,
+    capped at 200 iterations (a real case takes about 40–50).
+  - The answer is returned as an exact `{num, den}` and is **not** rounded to a micro-unit;
+    rounding happens only at display.
+  - Before returning, the answer is verified at minor-unit precision: recomputing `pmt` (or
+    `fv` when `pmt` is 0) must reproduce the input within one minor unit, or `rate` throws.
+- **What round-trip tests can promise.** Once a value has been rounded to a minor unit, rebuilding
+  the inputs from it is only exact up to that rounding. For example, pv rebuilt from the
+  cent-rounded mortgage payment is 200,000.63, and the cent payment implies a rate 2.5e-8
+  per period off 6.5%/12. Tests therefore check two things:
+  - re-solving from a rebuilt value gives the same rounded value;
+  - precision targets like "within 1e-9" are met at a scale fine enough for them (scale 6).
 - **Dates**: add-months with end-of-month clamping, 30/360, actual/365, actual/actual, and
   schedule generation all live in NovaLang.
 
@@ -110,7 +156,7 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
 ## Architecture
 - vendor/Nova_Lang — pinned submodule (read-only)
 - src/host/nova_runtime.py — loads the pinned interpreter, startup version + commit assertion
-- src/core/money.nova, rates.nova, dates.nova — foundation (M0)
+- src/core/numbers.nova, money.nova, rates.nova, dates.nova — foundation (M0, numbers.nova in M1)
 - src/core/math — scientific, units, algebra hooks
 - src/finance/tvm — PV/FV/PMT/N/IY, NPV/IRR
 - src/finance/loans — amortization, extra payments, refinance
@@ -123,7 +169,7 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
 - tests/core, tests/finance — golden test vectors
 
 ## Milestones
-- **M0 — Foundation only. No calculator modules.** ✅ done, awaiting review
+- **M0 — Foundation only. No calculator modules.** ✅ done, reviewed
   - Add the submodule at `02eabdb` and the version assertion.
   - `money.nova` (API surface only):
     - `make`, `add`, `subtract`, `negate`, `multiply_int`, `multiply_rate`, `compare`;
@@ -137,9 +183,16 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
     - `day_count_actual_365`, plus the helpers `is_leap_year` and `days_in_month`.
   - Other day-count conventions (30/360, actual/actual) land with the module that needs them.
   - `tools/run_tests.py` with the sentinel and count check, plus tests for all three modules.
-- **M1 — TVM:** PV/FV/PMT/N/rate, solve-for-any, NPV/IRR, golden vectors.
+- **M1 — TVM only.** 🚧 in progress, awaiting review.
+  - `src/finance/tvm.nova`: `fv`, `pv`, `pmt`, `n`, `rate`.
+  - `money.multiply_rate_exact` split, and `src/core/numbers.nova` (the NaN/Inf guard).
+  - Tests: `tests/finance/tvm_test.nova`, with Python reference vectors from
+    `tests/finance/gen_tvm_vectors.py`.
+  - CI: `.github/workflows/tests.yml`.
+  - NPV/IRR are deferred to a later milestone.
 - **M2 — Loans:** amortization schedule, extra payments, refinance, schedule rows for CSV.
 - **M3 — Compound interest** (`investments`).
 - **M4 — Scientific + units** (`core/math`).
 - **M5 — Tkinter host:** screens with formula/assumptions, CSV export, terminal debug harness.
-- **CI:** test job on every push, nightly `--bootstrap` job.
+- **CI** (`.github/workflows/tests.yml`): `tools/run_tests.py` on every push and PR, plus a nightly
+  `--bootstrap` job (cron, 07:17 UTC).

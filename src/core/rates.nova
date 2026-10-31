@@ -10,13 +10,12 @@
 # NovaLang's `/` returns a float for inexact integer division
 # (Nova_Lang/novalang.py:3258-3265), so this module uses only + - * // %.
 
+import "./numbers.nova" as numbers
+
 export let MICRO = 1000000
 
 def require_whole(value, what) {
-    if type(value) != "number" or floor(value) != value {
-        throw("rates: " + what + " must be a whole number, got " + str(value))
-    }
-    return floor(value)
+    return numbers.require_whole(value, what, "rates")
 }
 
 def require_rate(rate) {

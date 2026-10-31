@@ -1,5 +1,5 @@
 # module: money
-# expect: 31
+# expect: 39
 #
 # Golden values for src/core/money.nova. Every expected value is a hand-checked
 # exact integer.
@@ -64,5 +64,20 @@ t.check("carried remainder beats a pre-rounded rate", money.multiply_rate(princi
 t.check("exact half rounds away from zero", money.multiply_rate(money.make(100, 2, "USD"), rates.annual(5000)), money.make(1, 2, "USD"))
 t.check("negative exact half rounds away from zero", money.multiply_rate(money.make(-100, 2, "USD"), rates.annual(5000)), money.make(-1, 2, "USD"))
 t.check("zero rate gives zero", money.multiply_rate(principal, rates.annual(0)), money.make(0, 2, "USD"))
+
+# ---- added in M1: multiply_rate_exact, check_same_unit, NaN/Inf ----
+t.check("multiply_rate_exact is unrounded", money.multiply_rate_exact(principal, monthly), {num: 1300000000000, den: 12000000, scale: 2, currency: "USD"})
+let exact_interest = money.multiply_rate_exact(principal, monthly)
+t.check("multiply_rate is multiply_rate_exact rounded once", money.multiply_rate(principal, monthly).minor, money.round_half_up(exact_interest.num, exact_interest.den))
+t.check("multiply_rate_exact keeps a negative sign", money.multiply_rate_exact(money.negate(principal), monthly).num, -1300000000000)
+t.check("check_same_unit accepts a matching pair", money.check_same_unit(usd, one_cent), true)
+def same_unit_mismatch() { money.check_same_unit(usd, eur) }
+t.check_throws("check_same_unit rejects a mismatch", same_unit_mismatch, "same currency and scale")
+def make_nan() { money.make(json.loads("NaN"), 2, "USD") }
+t.check_throws("NaN minor is rejected", make_nan, "whole number")
+def make_inf() { money.make(json.loads("1e999"), 2, "USD") }
+t.check_throws("infinite minor is rejected", make_inf, "whole number")
+def multiply_nan() { money.multiply_int(usd, json.loads("NaN")) }
+t.check_throws("multiply_int rejects NaN", multiply_nan, "whole number")
 
 t.finish()
