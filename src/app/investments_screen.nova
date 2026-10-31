@@ -1,0 +1,202 @@
+# src/app/investments_screen.nova - the investments screen's calculation,
+# behind one call for the Python host. Same contract as the other facades.
+#
+# rows is the lot list as typed: [[symbol, shares, cost per share, current
+# price, purchase date YYYY-MM-DD or blank], ...]; completely blank rows are
+# skipped. Several rows with one symbol are lots of one position (they must
+# agree on the current price). as_of_text is the valuation date (the host
+# fills in today).
+#
+# Positions table (and CSV): one row per symbol, cost and value rounded once
+# per position (investments.nova), so every total equals the sum of its rows.
+# Annualized return per position: a single dated lot uses investments.cagr
+# over days / 365; a position bought on several dates has no single CAGR, so
+# it gets the money-weighted return - XIRR over its lots (for one lot the two
+# are identical under actual/365). The portfolio figure is XIRR over every
+# lot, shown only when every lot has a purchase date. No live prices: current
+# prices are typed (offline-first).
+
+import "./parse_helpers.nova" as inputs
+import "../core/money.nova" as money
+import "../core/rates.nova" as rates
+import "../core/dates.nova" as dates
+import "../finance/investments.nova" as inv
+import "../finance/cashflow.nova" as cf
+
+let PERCENT_SCALE = 2
+
+let ASSUMPTIONS = [
+    "Prices are typed in, not fetched: OmniCalc works offline.",
+    "Cost basis = shares x cost per share summed over a symbol's lots, rounded once to the cent; value likewise at the current price.",
+    "Annualized return: one dated lot = CAGR over actual days / 365; several dated lots = money-weighted (XIRR); blank dates = not shown.",
+    "Portfolio return = XIRR of every purchase and today's total value, shown only when every lot has a date.",
+    "Allocation weights are whole basis points that sum to exactly 100.00% (largest remainder)."
+]
+
+def blank(row) {
+    for cell in row {
+        if trim(cell) != "" {
+            return false
+        }
+    }
+    return true
+}
+
+# A rate {num, den} (micro-units) as a percent with 2 decimals: {value, scale}.
+def percent_of_rate(rate) {
+    return {value: money.round_half_up(rate.num * 100 * pow(10, PERCENT_SCALE), rate.den * rates.MICRO), scale: PERCENT_SCALE}
+}
+
+def sort_by_date(flows) {
+    let sorted_flows = []
+    for flow in flows {
+        append(sorted_flows, flow)
+        let j = len(sorted_flows) - 1
+        while j > 0 and sorted_flows[j].date_serial < sorted_flows[j - 1].date_serial {
+            let held = sorted_flows[j]
+            sorted_flows[j] = sorted_flows[j - 1]
+            sorted_flows[j - 1] = held
+            j = j - 1
+        }
+    }
+    return sorted_flows
+}
+
+# XIRR of buying each lot at its cost and holding until as_of at `value`.
+def money_weighted(lots, value_minor, as_of, unit) {
+    let flows = []
+    for lot in lots {
+        let cost = money.round_half_up(lot.shares.num * lot.price_per_share.minor, lot.shares.den)
+        append(flows, {date_serial: lot.date_serial, amount: money.make(0 - cost, unit.scale, unit.currency)})
+    }
+    append(flows, {date_serial: as_of, amount: money.make(value_minor, unit.scale, unit.currency)})
+    return cf.xirr(sort_by_date(flows))
+}
+
+export def calculate(rows, as_of_text) {
+    let as_of = inputs.date(as_of_text, "as-of date")
+    if type(rows) != "list" {
+        throw("parse: the position list must be a list of rows")
+    }
+    let positions = []
+    let index = {}
+    let all_dated = {yes: true}
+    for i = 0 to len(rows) - 1 {
+        let row = rows[i]
+        if type(row) != "list" or len(row) != 5 {
+            throw("parse: each position row needs a symbol, shares, cost per share, current price and purchase date")
+        }
+        if not blank(row) {
+            let symbol = upper(trim(row[0]))
+            if symbol == "" {
+                throw("parse: position row " + str(i + 1) + " needs a symbol")
+            }
+            let date_serial = -1
+            if trim(row[4]) != "" {
+                date_serial = inputs.date(row[4], symbol + " purchase date")
+                if date_serial > as_of {
+                    throw("parse: " + symbol + " purchase date is after the as-of date")
+                }
+            } else {
+                all_dated["yes"] = false
+            }
+            let lot = {date_serial: date_serial, shares: inputs.shares(row[1], symbol + " shares"), price_per_share: inputs.amount(row[2], symbol + " cost per share")}
+            let price = inputs.amount(row[3], symbol + " current price")
+            if symbol in index {
+                let position = positions[index[symbol]]
+                if position.current_price.minor != price.minor {
+                    throw("parse: " + symbol + " has two different current prices")
+                }
+                append(position.lots, lot)
+            } else {
+                index[symbol] = len(positions)
+                append(positions, {symbol: symbol, lots: [lot], current_price: price})
+            }
+        }
+    }
+    if len(positions) == 0 {
+        throw("parse: enter at least one position")
+    }
+
+    let unit = money.make(0, inputs.SCALE, inputs.CURRENCY)
+    let table = []
+    let totals = {cost: 0, value: 0}
+    let portfolio_lots = []
+    let position_values = []
+    for position in positions {
+        # Lots were built just above from parse_helpers output, so the
+        # unchecked core applies (tests/finance/investments_test.nova checks it
+        # agrees with position_summary).
+        let basis = inv.position_summary_whole(position.lots, position.current_price)
+        let value = basis.value
+        append(position_values, {symbol: position.symbol, value: value})
+        let gain = value.minor - basis.cost.minor
+        let gain_pct = {}
+        if basis.cost.minor > 0 {
+            gain_pct = {value: money.round_half_up(gain * 100 * pow(10, PERCENT_SCALE), basis.cost.minor), scale: PERCENT_SCALE}
+        }
+        let annualized = {}
+        let dated = {yes: true, single_date: position.lots[0].date_serial}
+        for lot in position.lots {
+            if lot.date_serial < 0 {
+                dated["yes"] = false
+            }
+            if lot.date_serial != dated.single_date {
+                dated["single_date"] = -2
+            }
+            append(portfolio_lots, lot)
+        }
+        if dated.yes and basis.cost.minor > 0 {
+            if dated.single_date >= 0 {
+                let days = as_of - dated.single_date
+                if days > 0 {
+                    annualized = percent_of_rate(inv.cagr(basis.cost, value, {num: days, den: 365}).rate)
+                }
+            } else {
+                annualized = percent_of_rate(money_weighted(position.lots, value.minor, as_of, unit))
+            }
+        }
+        append(table, [position.symbol, {value: basis.shares.num * pow(10, inputs.SHARES_SCALE) // basis.shares.den, scale: inputs.SHARES_SCALE}, basis.average_cost.minor, basis.cost.minor, position.current_price.minor, value.minor, gain, gain_pct, annualized])
+        totals["cost"] = totals.cost + basis.cost.minor
+        totals["value"] = totals.value + value.minor
+    }
+
+    let total_gain = totals.value - totals.cost
+    let total_gain_pct = {}
+    if totals.cost > 0 {
+        total_gain_pct = {value: money.round_half_up(total_gain * 100 * pow(10, PERCENT_SCALE), totals.cost), scale: PERCENT_SCALE}
+    }
+    let portfolio_return = {}
+    if all_dated.yes and totals.cost > 0 {
+        let earliest = {serial: as_of}
+        for lot in portfolio_lots {
+            if lot.date_serial < earliest.serial {
+                earliest["serial"] = lot.date_serial
+            }
+        }
+        if earliest.serial < as_of {
+            portfolio_return = percent_of_rate(money_weighted(portfolio_lots, totals.value, as_of, unit))
+        }
+    }
+
+    let weights = inv.allocation_of_values(position_values)
+    let allocation_rows = []
+    for w in weights {
+        append(allocation_rows, [w.symbol, w.value.minor, {value: w.weight_bp, scale: PERCENT_SCALE}])
+    }
+    return {
+        currency: inputs.CURRENCY,
+        scale: inputs.SCALE,
+        total_cost: totals.cost,
+        total_value: totals.value,
+        total_gain: total_gain,
+        total_gain_pct: total_gain_pct,
+        portfolio_return: portfolio_return,
+        positions: len(positions),
+        columns: ["symbol", "shares", "avg_cost", "cost_basis", "price", "value", "gain", "gain_pct", "annualized"],
+        column_kinds: ["text", "decimal", "money", "money", "money", "money", "money", "percent", "percent"],
+        rows: table,
+        extra_tables: [{title: "Allocation", columns: ["symbol", "value", "weight"], column_kinds: ["text", "money", "percent"], rows: allocation_rows}],
+        assumptions: ASSUMPTIONS
+    }
+}

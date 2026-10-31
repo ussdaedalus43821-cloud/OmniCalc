@@ -74,3 +74,12 @@ No new upstream issues. One useful verified behavior: a `def` nested inside a fu
 enclosing function's locals (a closure). `debt_payoff.nova` uses it to pass comparators to its
 stable sort. It's not mentioned in `Nova_Lang/README.md`, and it worked under both the direct and
 `--bootstrap` interpreters.
+
+## M7
+No new upstream issues. `regex(pattern, text)` is `re.search(...) is not None`
+(`novalang.py` `builtin_regex`), which makes it a cheap shape check. Use `\Z`, not `$`, to anchor
+the end, because `$` also matches before a trailing newline. Two `CLAUDE.md` reserved names
+(`num`, `values`) were tripped again in new code and caught at load time. Unrelated to NovaLang:
+Microsoft's RRI page contradicts itself ("1.2%", "8 years") next to its own `=RRI(96,...)`
+result of 0.0009933, which is the monthly rate the formula computes. The test uses the formula's
+value.

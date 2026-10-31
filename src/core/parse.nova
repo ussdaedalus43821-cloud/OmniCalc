@@ -10,15 +10,11 @@
 # every group after the first has exactly three digits ("1,234,567.89").
 # Anything else - "1,5", "1.2.3", "12a", "" - throws, naming the field.
 
-let DIGITS = "0123456789"
-
+# One regex() call (Nova_Lang/novalang.py builtin_regex: re.search) instead of
+# a per-character loop - parsing is on every screen's path (M7: 24 rows took
+# ~25 ms). \Z, not $: $ would also accept a trailing newline.
 def all_digits(text) {
-    for i = 0 to len(text) - 1 {
-        if not (text[i] in DIGITS) {
-            return false
-        }
-    }
-    return true
+    return regex("^[0-9]*\\Z", text)
 }
 
 def reject(what, text, why) {

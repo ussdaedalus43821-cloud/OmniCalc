@@ -7,16 +7,18 @@
 #   python3 vendor/Nova_Lang/novalang.py tools/calc_cli.nova savings fv 10000 500 7 30 ""
 #   python3 vendor/Nova_Lang/novalang.py tools/calc_cli.nova refinance 200000 6.5 360 1264.14 5.0 360 6000
 #   python3 vendor/Nova_Lang/novalang.py tools/calc_cli.nova debt_payoff '[["Card","6000","24.99","150"]]' 700 avalanche
-# (debt_payoff's debt list is passed as one JSON argument.)
+#   python3 vendor/Nova_Lang/novalang.py tools/calc_cli.nova investments '[["VTI","10","150","195.17","2023-01-15"]]' 2025-10-31
+# (debt_payoff's and investments' row lists are passed as one JSON argument.)
 
 import "../src/app/amortization_screen.nova" as amortization
 import "../src/app/savings_screen.nova" as savings
 import "../src/app/refinance_screen.nova" as refinance
 import "../src/app/debt_payoff_screen.nova" as debt_payoff
+import "../src/app/investments_screen.nova" as investments
 
 let given = args()
 if len(given) == 0 {
-    throw("usage: calc_cli.nova <amortization|savings|refinance|debt_payoff> <inputs as typed...>")
+    throw("usage: calc_cli.nova <amortization|savings|refinance|debt_payoff|investments> <inputs as typed...>")
 }
 let screen = given[0]
 let inputs = given[1:]
@@ -28,6 +30,8 @@ if screen == "amortization" and len(inputs) == 4 {
     print(json.dumps(refinance.calculate(inputs[0], inputs[1], inputs[2], inputs[3], inputs[4], inputs[5], inputs[6])))
 } else if screen == "debt_payoff" and len(inputs) == 3 {
     print(json.dumps(debt_payoff.calculate(json.loads(inputs[0]), inputs[1], inputs[2])))
+} else if screen == "investments" and len(inputs) == 2 {
+    print(json.dumps(investments.calculate(json.loads(inputs[0]), inputs[1])))
 } else {
     throw("calc_cli.nova: unknown screen or wrong number of inputs: " + str(given))
 }
