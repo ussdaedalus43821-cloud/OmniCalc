@@ -90,5 +90,24 @@ class DebtPayoffCsvTest(unittest.TestCase):
         self.assertEqual(len(rows), 4)
 
 
+class InvestmentsCsvTest(unittest.TestCase):
+    """Exit criterion: the positions CSV re-parses to the same positions."""
+
+    def test_positions_reparse(self):
+        import json
+        vector = json.load(open(os.path.join(REPO_ROOT, "tests", "app", "vectors", "portfolio_20.json")))
+        result = app.calculate("investments", vector["rows"], vector["as_of"])
+        buffer = io.StringIO()
+        app.export_csv(result, buffer)
+        rows = list(csv.reader(io.StringIO(buffer.getvalue())))
+        self.assertEqual(rows[0], ["symbol", "shares", "avg_cost", "cost_basis", "price", "value", "gain", "gain_pct", "annualized"])
+        self.assertEqual(len(rows), 21)
+        parsed = []
+        for row in rows[1:]:
+            parsed.append([row[0], int(row[1].replace(".", ""))] + [int(v.replace(".", "")) for v in row[2:7]]
+                          + [int(row[7].rstrip("%").replace(".", "")), int(row[8].rstrip("%").replace(".", ""))])
+        self.assertEqual(parsed, vector["expected"]["positions"])
+
+
 if __name__ == "__main__":
     unittest.main()

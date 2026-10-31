@@ -1,5 +1,5 @@
 # module: cashflow
-# expect: 72
+# expect: 76
 #
 # Reference values come from tests/finance/gen_cashflow_vectors.py, a separate
 # Python implementation: NPV summed term by term, IRR by plain bisection,
@@ -211,5 +211,12 @@ let canonical_table = am.schedule_table(usd(20000000), monthly_65, 360, usd(1264
 # 1e-12 window, so agreement - not equality - is the property.
 t.check_true("table_irr: agrees with schedule_irr within 1e-12, good guess", rates_within(cf.table_irr(canonical_table, monthly_65), cf.schedule_irr(canonical), 12))
 t.check_true("table_irr: a far-off guess falls back to the full search (same root within 1e-12)", rates_within(cf.table_irr(canonical_table, rates.annual(500000)), cf.schedule_irr(canonical), 12))
+
+# ---- after M7: xirr_from_guess (a guessed start must never change the answer) ----
+t.check_true("good guess: same XIRR as the full search (Excel example)", rates_within(cf.xirr_from_guess(excel, rates.annual(350000)), excel_rate, 11))
+t.check_true("bad guess (-50%): falls back, same answer", rates_within(cf.xirr_from_guess(excel, rates.annual(-500000)), excel_rate, 11))
+t.check_true("bad guess (+900%): falls back, same answer (irregular gaps)", rates_within(cf.xirr_from_guess(gaps, rates.annual(9000000)), cf.xirr(gaps), 11))
+def guess_two_changes() { cf.xirr_from_guess([dated(day0, -10000), dated(day0 + 365, 23000), dated(day0 + 730, -13200)], rates.annual(100000)) }
+t.check_throws("the same checks as xirr apply first", guess_two_changes, "docs/ESCAPE-HATCHES.md")
 
 t.finish()

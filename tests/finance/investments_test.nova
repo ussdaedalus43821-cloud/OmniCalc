@@ -1,0 +1,87 @@
+# module: investments
+# expect: 28
+#
+# Reference values from tests/finance/gen_investments_vectors.py (fractions for
+# shares and money, 50-digit decimal for CAGR, largest-remainder allocation).
+# CAGR uses a float power (a known approximation), so it is compared within
+# 1e-10; Excel's RRI example (0.0009933) within its 7 shown digits.
+
+import "../../tools/check.nova" as t
+import "../../src/core/money.nova" as money
+import "../../src/core/rates.nova" as rates
+import "../../src/finance/investments.nova" as inv
+
+def usd(minor) {
+    return money.make(minor, 2, "USD")
+}
+def lot(top, bottom, price) {
+    return {date_serial: 19000, shares: {num: top, den: bottom}, price_per_share: usd(price)}
+}
+def years(top, bottom) {
+    return {num: top, den: bottom}
+}
+# |rate - reference| <= 10^-digits, rate {num, den} in micro-units, reference a float.
+def cagr_near(result, reference, digits) {
+    return abs(result.float - reference) <= pow(10, 0 - digits)
+}
+
+# ---- one lot ----
+let single = [lot(10, 1, 15000)]
+t.check("single lot: cost basis", inv.position_cost_basis(single).cost, usd(150000))
+t.check("single lot: value at 172.35", inv.position_value(single, usd(17235)), usd(172350))
+t.check("single lot: unrealized gain", inv.unrealized_gain(single, usd(17235)), usd(22350))
+
+# ---- three lots, one fractional ----
+let lots = [lot(10, 1, 15000), lot(5, 1, 18000), lot(12, 5, 21050)]
+let basis = inv.position_cost_basis(lots)
+t.check("3 lots: total shares 17.4 = 87/5, exact", basis.shares, {num: 87, den: 5})
+t.check("3 lots: cost basis", basis.cost, usd(290520))
+t.check("3 lots: weighted-average cost per share", basis.average_cost, usd(16697))
+t.check("3 lots: value at 195.17", inv.position_value(lots, usd(19517)), usd(339596))
+t.check("3 lots: unrealized gain", inv.unrealized_gain(lots, usd(19517)), usd(49076))
+t.check("a loss is negative", inv.unrealized_gain(single, usd(14000)), usd(-10000))
+
+# ---- fractional shares stay exact ----
+t.check("0.5 shares at 100.00 costs exactly 50.00", inv.position_cost_basis([lot(1, 2, 10000)]).cost, usd(5000))
+t.check("0.333333 shares at 299.99 rounds once to 100.00", inv.position_cost_basis([lot(333333, 1000000, 29999)]).cost, usd(10000))
+
+# ---- CAGR ----
+t.check_true("doubling in 10 years: 7.17734625...%", cagr_near(inv.cagr(usd(100), usd(200), years(10, 1)), 0.0717734625362932, 10))
+t.check_true("halving in 5 years: -12.94494...%", cagr_near(inv.cagr(usd(200), usd(100), years(5, 1)), -0.129449436703876, 10))
+t.check("one year: the simple return, 12.5%", inv.cagr(usd(10000), usd(11250), years(1, 1)).rate, {num: 125000000000, den: 1000000})
+t.check_true("fractional years: 10,000 -> 15,000 over 1,000 days / 365", cagr_near(inv.cagr(usd(10000), usd(15000), years(1000, 365)), 0.159506825702113, 10))
+let rri = inv.cagr(usd(1000000), usd(1100000), years(96, 1))
+t.check_true("Excel RRI(96, 10000, 11000) = 0.0009933 (Excel's 7 digits)", abs(rri.float - 0.0009933) < 0.00000005)
+t.check_true("the same within 1e-12 of the 50-digit reference", cagr_near(rri, 0.000993307376291395, 12))
+t.check("a total loss is -100%", inv.cagr(usd(100), usd(0), years(2, 1)).rate, {num: -1000000000000, den: 1000000})
+
+# ---- allocation ----
+def pick_bp(item) {
+    return item.weight_bp
+}
+def holding(symbol, value) {
+    return {symbol: symbol, lots: [lot(1, 1, value)], current_price: usd(value)}
+}
+let weights = inv.allocation([holding("A", 123456), holding("B", 654321), holding("C", 222222)])
+t.check("allocation: sorted by value, largest remainder", [weights[0].symbol, weights[0].weight_bp, weights[1].symbol, weights[1].weight_bp, weights[2].symbol, weights[2].weight_bp], ["B", 6543, "C", 2222, "A", 1235])
+t.check("allocation: three equal values sum to exactly 10,000", map(pick_bp, inv.allocation([holding("X", 100), holding("Y", 100), holding("Z", 100)])), [3334, 3333, 3333])
+
+# ---- M7 speedup: the one-pass summary and allocation from values agree ----
+let summary = inv.position_summary(lots, usd(19517))
+t.check("position_summary agrees with the separate functions", [summary.cost, summary.shares, summary.average_cost, summary.value], [basis.cost, basis.shares, basis.average_cost, inv.position_value(lots, usd(19517))])
+t.check("position_summary_whole (unchecked core) agrees with position_summary", inv.position_summary_whole(lots, usd(19517)), summary)
+t.check("allocation_of_values agrees with allocation", inv.allocation_of_values([{symbol: "A", value: usd(123456)}, {symbol: "B", value: usd(654321)}, {symbol: "C", value: usd(222222)}]), weights)
+
+# ---- rejected inputs ----
+def negative_shares() { inv.position_cost_basis([lot(-1, 1, 100)]) }
+t.check_throws("negative shares", negative_shares, "shares must be positive")
+def zero_initial() { inv.cagr(usd(0), usd(100), years(1, 1)) }
+t.check_throws("CAGR with a zero initial value", zero_initial, "positive initial value")
+def zero_years() { inv.cagr(usd(100), usd(200), years(0, 1)) }
+t.check_throws("CAGR over zero years", zero_years, "must be positive")
+def no_lots() { inv.position_value([], usd(100)) }
+t.check_throws("a position with no lots", no_lots, "at least one lot")
+def negative_price() { inv.position_value(single, usd(-1)) }
+t.check_throws("a negative current price", negative_price, "must not be negative")
+
+t.finish()

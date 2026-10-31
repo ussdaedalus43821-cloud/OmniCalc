@@ -507,7 +507,9 @@ export def schedule_irr(schedule) {
 # XIRR uses Descartes' rule like irr(), with the flows ordered by date: V = 0
 # has no root (throws); V = 1 has exactly one, found over -99.99% ..
 # 1,048,576% a year by bracketing and bisection to 1e-12 a year, verified to
-# leave an XNPV within one minor unit of zero. V >= 2 is NOT supported:
+# leave an XNPV within one minor unit of zero (M7: the root is found by the
+# Illinois method in floats, falling back to bisection if its answer fails
+# that check). V >= 2 is NOT supported:
 # Budan's theorem needs a polynomial, and here the degree would be the
 # number of days (thousands). That is a planned escape hatch
 # (docs/ESCAPE-HATCHES.md).
@@ -531,7 +533,7 @@ def validate_dated(dated_flows) {
         if days < 0 {
             throw("cashflow: a flow is dated " + str(0 - days) + " days before the first flow; the first flow must be the earliest (as in Excel)")
         }
-        append(terms, [days, flow.amount.minor])
+        append(terms, [days, flow.amount.minor, 0 - days / 365])
     }
     return {unit: dated_flows[0].amount, terms: terms}
 }
@@ -539,11 +541,11 @@ def validate_dated(dated_flows) {
 # sum of minor_i * (1 + r)^(-days_i / 365) at r = numerator / (den * MICRO), a float.
 def xnpv_float(terms, numerator, den) {
     let growth = 1 + numerator / (den * MICRO)
-    let acc = {v: 0}
+    let total = 0
     for term in terms {
-        acc["v"] = acc.v + term[1] * pow(growth, 0 - term[0] / 365)
+        total = total + term[1] * pow(growth, term[2])
     }
-    return acc.v
+    return total
 }
 
 # A finite float rounded half-up (away from zero) to a whole number.
@@ -612,6 +614,62 @@ def xbisect(terms, lo, hi, s_lo) {
     throw("cashflow: XIRR did not converge in " + str(MAX_BISECTIONS) + " bisections")
 }
 
+# The Illinois method (false position that halves a stale endpoint's value):
+# the XIRR root inside [lo, hi] (micro-units per year over den 1, opposite
+# signs), in floats. Converges superlinearly - ~10 evaluations where
+# bisection to 1e-12 takes ~40 - so XIRR stays inside the UI budget with
+# dozens of flows (M7: a 26-flow portfolio went from 31 ms). Returns the
+# rate {num, den} (den = 1e6, precision 1e-12), or {} if it did not settle;
+# the caller verifies the answer and falls back to xbisect.
+def xillinois(terms, lo, hi) {
+    let a = {x: lo / MICRO, f: xnpv_float(terms, lo, 1)}
+    let b = {x: hi / MICRO, f: xnpv_float(terms, hi, 1)}
+    let side = {last: 0}
+    for i = 1 to 100 {
+        if abs(b.x - a.x) < 0.0000000000001 {
+            return float_rate((a.x + b.x) / 2)
+        }
+        let c = b.x - b.f * (b.x - a.x) / (b.f - a.f)
+        let fc = xnpv_float(terms, round_float_half_up(c * 1000000000000), MICRO)
+        # Not "stop once XNPV < half a minor unit": with small amounts that
+        # pins the rate only to ~1e-6 (the XIRR reference tests caught it).
+        # Converge on the rate itself; the minor-unit check is a safety net.
+        if fc == 0 {
+            return float_rate(c)
+        }
+        if sign(fc) == sign(b.f) {
+            b["x"] = c
+            b["f"] = fc
+            if side.last == 1 {
+                a["f"] = a.f / 2
+            }
+            side["last"] = 1
+        } else {
+            a["x"] = c
+            a["f"] = fc
+            if side.last == -1 {
+                b["f"] = b.f / 2
+            }
+            side["last"] = -1
+        }
+    }
+    return {}
+}
+
+def float_rate(x) {
+    return {num: round_float_half_up(x * 1000000000000), den: MICRO}
+}
+
+# Illinois first; keep its answer only if it passes the same check xbisect
+# applies (XNPV within one minor unit of zero), else bisect.
+def xsolve(terms, lo, hi, s_lo) {
+    let fast = xillinois(terms, lo, hi)
+    if "num" in fast and abs(round_float_half_up(xnpv_float(terms, fast.num, fast.den))) <= 1 {
+        return fast
+    }
+    return xbisect(terms, lo, hi, s_lo)
+}
+
 # XNPV at an ANNUAL rate, rounded half-up once to a minor unit.
 export def xnpv(rate, dated_flows) {
     require_rate(rate)
@@ -623,6 +681,35 @@ export def xnpv(rate, dated_flows) {
 # The annual XIRR as an unrounded {num, den}. Throws when there is no root
 # (single-sign flows) and when the flows change sign more than once.
 export def xirr(dated_flows) {
+    return xirr_of_terms(checked_terms(dated_flows))
+}
+
+# xirr() started from a guess (a rate {num, den}, annual): Illinois runs
+# inside a bracket of +-GUESS_WINDOW micro-units around it, which skips the
+# outward bracket walk (~7 evaluations). If that window shows no sign change -
+# a bad guess - the full search runs, so a bad guess costs time, never
+# correctness (tests/finance/cashflow_test.nova passes -50% and checks the
+# answer is unchanged). The same checks as xirr() apply first.
+let GUESS_WINDOW = 50000
+export def xirr_from_guess(dated_flows, guess) {
+    let terms = checked_terms(dated_flows)
+    rates.check_rate(guess)
+    let centre = guess.num // guess.den
+    let lo = centre - GUESS_WINDOW
+    if lo < -999900 {
+        lo = -999900
+    }
+    let hi = centre + GUESS_WINDOW
+    let s_lo = xsign(terms, lo, 1)
+    let s_hi = xsign(terms, hi, 1)
+    if s_lo != 0 and s_hi != 0 and s_lo != s_hi {
+        return xsolve(terms, lo, hi, s_lo)
+    }
+    return xirr_of_terms(terms)
+}
+
+# Validated terms with exactly one sign change (else the documented throws).
+def checked_terms(dated_flows) {
     let shape = validate_dated(dated_flows)
     let changes = dated_sign_changes(shape.terms)
     if changes == 0 {
@@ -631,7 +718,10 @@ export def xirr(dated_flows) {
     if changes > 1 {
         throw("cashflow: these dated flows change sign " + str(changes) + " times; XIRR supports one sign change in v1 (Budan's theorem does not apply to day-count exponents). The planned Python escape hatch is in docs/ESCAPE-HATCHES.md")
     }
-    let terms = shape.terms
+    return shape.terms
+}
+
+def xirr_of_terms(terms) {
     let s0 = xsign(terms, 0, 1)
     if s0 == 0 {
         return {num: 0, den: 1}
@@ -643,7 +733,7 @@ export def xirr(dated_flows) {
             return {num: k, den: 1}
         }
         if s != s0 {
-            return xbisect(terms, previous.k, k, s0)
+            return xsolve(terms, previous.k, k, s0)
         }
         previous["k"] = k
     }
@@ -654,7 +744,7 @@ export def xirr(dated_flows) {
             return {num: k, den: 1}
         }
         if s != s0 {
-            return xbisect(terms, k, previous.k, s)
+            return xsolve(terms, k, previous.k, s)
         }
         previous["k"] = k
     }

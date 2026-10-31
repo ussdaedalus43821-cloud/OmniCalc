@@ -84,7 +84,10 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
     goes to the façade), and **rows** (an editable list with Add row / Remove last row, which
     goes to the façade as a list of lists of strings).
   - A **phrase** is `{before, amount, after}`: the façade decides how a number reads ("saves X" /
-    "costs X MORE"), and the host only formats the amount. The table
+    "costs X MORE"), and the host only formats the amount, which may be absent.
+  - **`decimal`** is `{value, scale}`, e.g. fractional shares. A `percent` with no value (`{}`)
+    shows as "-". A façade may return **`extra_tables`** (`[{title, columns, column_kinds,
+    rows}]`), drawn below the main table; CSV exports the main table only. The table
   and CSV come from the façade's `columns`, `column_kinds` and `rows`, so one exporter serves every
   screen.
 - Each screen gets **its own NovaLang engine**, because every façade exports `calculate`. Startup
@@ -150,6 +153,8 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
   - `cashflow.irr(from_schedule(s))` (checked) / `cashflow.schedule_irr(s)` (unchecked core
     `shape_whole`, for schedules built by `amortization.nova`). This cut end to end from
     89 ms to 60 ms. A test checks that both agree.
+  - `investments.position_summary` / `position_summary_whole` (M7, for lots the screen just
+    built from parsed values), and `investments.allocation` / `allocation_of_values`.
   - `amortization.schedule*` (money rows) / `amortization.schedule_table` (the int-row core
     `table_whole`, after the same input checks), plus `cashflow.table_irr(table, guess)`. It
     builds the IRR polynomial straight from the int rows and starts bisection from a
@@ -271,8 +276,15 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
   `docs/ESCAPE-HATCHES.md`. Amounts stay integer, and the result is rounded half-up once.
 - **XIRR.** Descartes' rule on the flows in date order:
   - V = 0 throws;
-  - V = 1: bracket and bisect to 1e-12 a year, verified to leave an XNPV within one minor
-    unit of zero;
+  - V = 1: bracket, then the **Illinois method** in floats (M7; about 10 evaluations where
+    bisection needed about 40), converging on the *rate*. `xirr_from_guess(flows, guess)`
+    skips the outward bracket walk by trying a ±500 bp window around a guess first. The
+    investments screen guesses value ÷ cost annualized over first purchase → as-of. A guess with
+    no sign change in its window falls back to the full search; tests pass −50% and +900% guesses
+    and check the answer is unchanged. The answer must leave an XNPV within
+    one minor unit of zero, or it falls back to bisection. Stopping early "once XNPV is under half
+    a minor unit" was tried and rejected: with small amounts it only pins the rate to about 1e-6,
+    and the reference tests caught it;
   - **V ≥ 2 throws**, because Budan doesn't apply when the degree is a day count. A planned
     escape hatch is tracked.
 - **References:** Microsoft's XNPV/XIRR example (XNPV(9%) = 2,086.65, XIRR 0.373362535,
@@ -341,6 +353,33 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
   strategies. Inlining the rounding was measured and gained nothing beyond noise, so it calls the
   one rounding rule.
 
+## Investments convention (`src/finance/investments.nova`, `src/app/investments_screen.nova`, M7)
+- **Lots:** a lot is `{date_serial, shares, price_per_share}`. Shares are an exact fraction
+  `{num, den}`, typed with up to 6 decimals and never a float.
+- **Rounding:** cost basis and value are summed exactly over a position's lots and rounded
+  half-up **once** per position, so every total equals the sum of its rows.
+- **CAGR** = (final / initial)^(1 / years) − 1, with fractional years (days / 365). It uses a float
+  power, which is a known approximation like XNPV. It's checked against Excel's RRI example
+  (RRI(96, 10000, 11000) = 0.0009933) and a 50-digit reference.
+- **Allocation:** integer basis points summing to **exactly** 10,000, by largest remainder.
+- **The screen:**
+  - Rows are purchase lots; several rows with one symbol form one position and must agree on the
+    current price. Prices are typed, never fetched (offline-first).
+  - Dates are parsed in NovaLang (`parse_helpers.date`). The host only fills in today's date as
+    text.
+  - **Annualized return per position:** one dated lot uses CAGR. Several dated lots use XIRR,
+    because a position bought on several dates has no single CAGR; for one lot the two are
+    identical under actual/365.
+  - The **portfolio** figure is XIRR over every lot, shown only when every lot has a date.
+- **No persistence**, no history, no live prices in M7. Those are M8+ decisions.
+- **Speed:** a 24-lot, 20-position portfolio took 136 ms; after the unchecked cores, Illinois
+  XIRR and a **guessed-start XIRR** it's **about 72–85 ms median** in this container. That meets
+  the portfolio-screen target (< 90 ms). `tools/perf.py` monitors it as the `investments_20`
+  scenario.
+- **The per-position annualized return stays,** even though the brief didn't ask for it: "which
+  position is my best performer?" is what a portfolio screen is for. Features aren't cut to hit a
+  budget.
+
 ## Amortization rules (`src/finance/amortization.nova`)
 - **Magnitudes, not signed cash flows.** Principal, payment, extra and lump sums are positive
   money, and rows report positive amounts. To use a TVM payment, which is negative, pass
@@ -372,8 +411,18 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
     interest.
 
 ## Performance rule
-- UI-path budget: **100 ms**, roughly 10k interpreter steps (interpreter speed is about 162k
-  steps/s, `Nova_Lang/README.md` "ECS & particle engine").
+- UI-path budget: **100 ms per button press**, roughly 10k interpreter steps (interpreter speed is
+  about 162k steps/s, `Nova_Lang/README.md` "ECS & particle engine").
+- **Calculate-path median targets** (decided after M7):
+  - **under 70 ms for single-schedule screens** (amortization, savings, refinance, debt payoff);
+  - **under 90 ms for portfolio screens** (investments).
+  Why: the 70 ms target dates from M4 and assumed amortization-style work. A portfolio press runs
+  one XIRR per multi-lot position plus a portfolio XIRR and an allocation. The hard limit is still
+  100 ms per press.
+- **Profile before writing a screen.** Before writing a new screen, profile the backing
+  module's hot path with a synthetic worst-case input. If it's already over 50 ms, design the
+  unchecked-core path from the start, rather than discovering it after the façade is written.
+  M7 skipped this step and then had to chase 136 ms down to about 75 ms.
 - A calculator over budget (e.g. Monte Carlo, large IRR searches, bulk jobs) moves to Python behind
   the same interface. It must have a **parity test** against the NovaLang version and be listed in
   `docs/ESCAPE-HATCHES.md`.
@@ -428,7 +477,8 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
 - src/finance/amortization.nova — schedules, extra payments, biweekly (M2); schedule_table (pre-M5)
 - src/finance/refinance.nova — keep vs refinance comparison (M5)
 - src/finance/debt_payoff.nova — snowball / avalanche plans (M6)
-- src/app/parse_helpers.nova — shared façade input parsing (M6)
+- src/app/parse_helpers.nova — shared façade input parsing (M6; shares and dates in M7)
+- src/finance/investments.nova — positions, gains, CAGR, allocation (M7)
 - src/finance/investments — compound interest (v1); CAGR, DCA, retirement (later)
 - src/finance/business — margin, break-even, ROI, depreciation (post-v1)
 - src/app — NovaLang screen façades (one per screen; all the screen's math)
@@ -495,7 +545,7 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
   - Nightly performance monitor: `tools/perf.py` plus a CI job that uploads `perf-results.json`
     and fails only the nightly job on a >20% median regression vs `tools/perf_baseline.json`.
 - **M5** ✅ done, reviewed.
-- **M6 — debt payoff and gap-fills.** 🚧 in progress, awaiting review.
+- **M6 — debt payoff and gap-fills.** ✅ done, reviewed. Merged to `main` as `v0.1.0` (PR #1).
   - Gap-fills:
     - savings solve-for (FV / PMT / N);
     - `total_savings` → `savings_over_remaining_term`, with lifetime as the headline;
@@ -504,8 +554,19 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
     - the CI perf baseline committed.
   - `src/finance/debt_payoff.nova` and `src/app/debt_payoff_screen.nova` (a fourth tab).
   - The two planned escape hatches moved to M7 or later; neither is needed by these screens.
-- **M7 — decide after using the app:** investments (portfolio, CAGR, dividends) or the
-  ordinary math engine (scientific, units, date math).
+- **Pre-M7:**
+  - solved savings goals round up (`money.round_ceiling`, `tvm.pmt_exact`);
+  - the 10+ debt trigger was recorded;
+  - PR #1 merged to `main`;
+  - the perf gate was calibrated (raw ms false-alarmed across runners).
+- **M7 — investments (Option A).** 🚧 in progress, awaiting review.
+  - `src/finance/investments.nova`, `src/app/investments_screen.nova` (a fifth tab, with an
+    allocation table as an `extra_tables` entry).
+  - Tests: `tests/finance/investments_test.nova` (vectors: `gen_investments_vectors.py`) and
+    `tests/app/investments_screen_test.nova`, which diffs a 20-position portfolio against
+    `tests/app/vectors/portfolio_20.json` (`gen_portfolio_vectors.py`).
+- **M8 — decide after using the app for a week:** the ordinary math engine (scientific, units,
+  date math), persistence, or whatever the week shows is missing.
 - **Later — compound interest** (`investments`).
 - **Later — Scientific + units** (`core/math`).
 - **Later — the full Tkinter host:** screens with formula/assumptions, CSV export, a terminal debug

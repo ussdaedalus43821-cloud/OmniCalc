@@ -209,9 +209,39 @@ These were checked against the budget and stay in NovaLang. Re-measure if inputs
 - `tools/perf.py` now times a fixed NovaLang workload in the same process and gates on
   median ÷ calibration. The baseline is re-taken from CI run 41243936952.
 
+### Investments screen — 20 positions, 24 lots (M7, 2026-10-31)
+- Through the bridge, a 24-lot portfolio first took **136 ms**. The phases: parsing about 25 ms;
+  positions about 45 ms, including four multi-lot XIRRs; portfolio XIRR about 28 ms; allocation
+  about 8 ms.
+- What was done:
+  - the unchecked-core pattern twice: `position_summary_whole` for façade-built lots, and
+    `allocation_of_values` so values aren't recomputed;
+  - a regex shape check plus direct `num()` in `parse_helpers.date`;
+  - Illinois instead of bisection inside XIRR's bracket;
+  - XIRR's day exponents computed once per call.
+- Result: **78–89 ms median** headless (best about 75–81 ms). That's inside the 100 ms budget
+  but above the 70 ms target. In the GUI, the default 3-lot tab is 18 ms median.
+- **After review:**
+  - **Applied** a guessed-start XIRR (`cashflow.xirr_from_guess`). The guess is value ÷ cost
+    annualized over first purchase → as-of, searched with a ±500 bp window and a full-search
+    fallback; tests cover bad guesses of −50% and +900%. This brought the screen to
+    **72–85 ms median** (`investments_20` in `tools/perf.py`), within the < 90 ms target for
+    portfolio screens.
+  - **Kept** the per-position XIRR for multi-lot positions. It answers "which position is my
+    best performer?", so cutting it to hit a budget was the wrong lever.
+- Tried and rejected: stopping Illinois once XNPV is under half a minor unit. It lost XIRR
+  precision on small amounts, and the reference tests failed.
+
 ## Known approximations
 
 Behavior that is deliberately not exact.
+
+### CAGR uses a float power (M7)
+- `investments.cagr` computes `(final / initial)^(1 / years)` with `pow()` on floats; a
+  fractional power has no exact form.
+- The result is returned as a rate `{num, den}` with 1e-12 precision, plus the float.
+- It matches a 50-digit reference within 1e-10 (1e-12 for the RRI case) and Excel's RRI example
+  to Excel's 7 shown digits.
 
 ### XNPV / XIRR discount factors are binary floats (M4)
 - **What.** `cashflow.xnpv`/`xirr` discount each flow by `(1 + rate)^(days / 365)` using

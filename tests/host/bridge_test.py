@@ -25,6 +25,8 @@ SCREEN_INPUTS = {
     "refinance": [("200,000.00", "6.5", "360", "1,264.14", "5.0", "360", "6,000"), ("200000", "6.5", "360", "1264.14", "5", "180", "6000")],
     "debt_payoff": [([["Medical", "1,200", "0", "50"], ["Card", "6,000", "24.99", "150"], ["Car", "9,000", "7", "250"]], "700", "avalanche"),
                     ([["Big", "9,000", "18", "200"], ["Small", "1,500", "18", "40"]], "600", "snowball")],
+    "investments": [(json.load(open(os.path.join(REPO_ROOT, "tests", "app", "vectors", "portfolio_20.json")))["rows"], "2025-10-31"),
+                    ([["VTI", "10", "150", "195.17", "2023-01-15"], ["CASH", "1000", "1", "1", ""]], "2025-10-31")],
 }
 # CI runners are slower and noisier than a workstation; the workflow may
 # raise this with OMNICALC_BUDGET_MS. Locally it is the real 100 ms budget.

@@ -1,0 +1,251 @@
+# src/finance/investments.nova - positions, gains, CAGR and allocation.
+#
+# ---- Conventions ----
+# A lot is {date_serial, shares, price_per_share}: shares is an exact positive
+#   fraction {num, den} (fractional shares are common; NovaLang has no
+#   decimals, so never a float), price_per_share is money (minor units).
+#   date_serial is a dates.nova serial (it is carried for the screen's CAGR;
+#   the cost-basis maths here does not use it).
+# Cost basis = sum of shares x price over the lots, summed EXACTLY and rounded
+#   half-up ONCE to a minor unit; the same for market value. The average cost
+#   per share is cost / shares, rounded half-up (display only).
+# A holding is {symbol, lots, current_price}; allocation weights are integer
+#   basis points that sum to EXACTLY 10,000, by the largest-remainder method
+#   (ties go to the larger value, then the earlier holding).
+# CAGR = (final / initial)^(1 / years) - 1, with years a positive fraction
+#   (e.g. days / 365). The fractional power has no exact form, so it is a
+#   float - a known approximation (docs/ESCAPE-HATCHES.md), like XNPV. It is
+#   returned as a rate {num, den} in micro-units (den = 1e6, so precision
+#   1e-12), plus the float itself.
+
+import "../core/numbers.nova" as numbers
+import "../core/money.nova" as money
+import "../core/rates.nova" as rates
+
+let BASIS_POINTS = 10000
+
+def gcd(a, b) {
+    let pair = {a: abs(a), b: abs(b)}
+    while pair.b != 0 {
+        let r = pair.a % pair.b
+        pair["a"] = pair.b
+        pair["b"] = r
+    }
+    return pair.a
+}
+
+def reduced(numerator, denominator) {
+    let g = gcd(numerator, denominator)
+    if g == 0 {
+        return {num: 0, den: 1}
+    }
+    return {num: numerator // g, den: denominator // g}
+}
+
+def require_shares(shares) {
+    if type(shares) != "dict" or not ("num" in shares) or not ("den" in shares) {
+        throw("investments: shares must be a fraction {num, den}, got " + str(shares))
+    }
+    let n = numbers.require_whole(shares.num, "shares numerator", "investments")
+    let d = numbers.require_whole(shares.den, "shares denominator", "investments")
+    if d <= 0 or n <= 0 {
+        throw("investments: shares must be positive, got " + str(shares.num) + "/" + str(shares.den))
+    }
+    return {num: n, den: d}
+}
+
+def require_price(price, what) {
+    money.check_same_unit(price, price)
+    if price.minor < 0 {
+        throw("investments: " + what + " must not be negative")
+    }
+    return price
+}
+
+# Exact totals of a lot list: {shares_num, shares_den, cost_num, cost_den, unit}.
+def lot_totals(lots) {
+    if type(lots) != "list" or len(lots) == 0 {
+        throw("investments: a position needs at least one lot {date_serial, shares, price_per_share}")
+    }
+    let t = {shares_num: 0, shares_den: 1, cost_num: 0, cost_den: 1}
+    for lot in lots {
+        if type(lot) != "dict" or not ("shares" in lot) or not ("price_per_share" in lot) {
+            throw("investments: each lot must be {date_serial, shares, price_per_share}, got " + str(lot))
+        }
+        let s = require_shares(lot.shares)
+        let p = require_price(lot.price_per_share, "a lot's price per share")
+        money.check_same_unit(lots[0].price_per_share, p)
+        let shares = reduced(t.shares_num * s.den + s.num * t.shares_den, t.shares_den * s.den)
+        t["shares_num"] = shares.num
+        t["shares_den"] = shares.den
+        let cost = reduced(t.cost_num * s.den + s.num * p.minor * t.cost_den, t.cost_den * s.den)
+        t["cost_num"] = cost.num
+        t["cost_den"] = cost.den
+    }
+    t["unit"] = lots[0].price_per_share
+    return t
+}
+
+def as_money(unit, minor) {
+    return {minor: minor, scale: unit.scale, currency: unit.currency}
+}
+
+# {cost, shares, average_cost}: cost basis (money), total shares (fraction),
+# and average cost per share (money, half-up).
+export def position_cost_basis(lots) {
+    let t = lot_totals(lots)
+    return {
+        cost: as_money(t.unit, money.round_half_up(t.cost_num, t.cost_den)),
+        shares: {num: t.shares_num, den: t.shares_den},
+        average_cost: as_money(t.unit, money.round_half_up(t.cost_num * t.shares_den, t.cost_den * t.shares_num))
+    }
+}
+
+export def position_value(lots, current_price) {
+    let t = lot_totals(lots)
+    require_price(current_price, "the current price")
+    money.check_same_unit(t.unit, current_price)
+    return as_money(t.unit, money.round_half_up(t.shares_num * current_price.minor, t.shares_den))
+}
+
+# Current value - cost basis (signed money).
+export def unrealized_gain(lots, current_price) {
+    return money.subtract(position_value(lots, current_price), position_cost_basis(lots).cost)
+}
+
+# Everything the screen needs about one position in ONE validated pass over
+# its lots (cost basis, value and allocation each re-validated the lots: M7
+# measured ~31 ms for 20 positions). {shares, cost, average_cost, value}.
+export def position_summary(lots, current_price) {
+    let t = lot_totals(lots)
+    require_price(current_price, "the current price")
+    money.check_same_unit(t.unit, current_price)
+    return {
+        shares: {num: t.shares_num, den: t.shares_den},
+        cost: as_money(t.unit, money.round_half_up(t.cost_num, t.cost_den)),
+        average_cost: as_money(t.unit, money.round_half_up(t.cost_num * t.shares_den, t.cost_den * t.shares_num)),
+        value: as_money(t.unit, money.round_half_up(t.shares_num * current_price.minor, t.shares_den))
+    }
+}
+
+# The unchecked core of position_summary (CLAUDE.md "Hot-loop primitives"):
+# the same arithmetic with no per-lot validation, for lots the caller built
+# from values it has already validated (the investments screen builds them
+# from parse_helpers output). Every lot MUST have shares {num > 0, den > 0} and
+# a non-negative price_per_share sharing current_price's unit.
+export def position_summary_whole(lots, current_price) {
+    let shares_num = 0
+    let shares_den = 1
+    let cost_num = 0
+    let cost_den = 1
+    for lot in lots {
+        let s = lot.shares
+        let p = lot.price_per_share.minor
+        let shares = reduced(shares_num * s.den + s.num * shares_den, shares_den * s.den)
+        shares_num = shares.num
+        shares_den = shares.den
+        let cost = reduced(cost_num * s.den + s.num * p * cost_den, cost_den * s.den)
+        cost_num = cost.num
+        cost_den = cost.den
+    }
+    return {
+        shares: {num: shares_num, den: shares_den},
+        cost: as_money(current_price, money.round_half_up_whole(cost_num, cost_den)),
+        average_cost: as_money(current_price, money.round_half_up_whole(cost_num * shares_den, cost_den * shares_num)),
+        value: as_money(current_price, money.round_half_up_whole(shares_num * current_price.minor, shares_den))
+    }
+}
+
+# CAGR from money values over `years` = {num, den} > 0.
+export def cagr(initial_value, final_value, years) {
+    money.check_same_unit(initial_value, final_value)
+    if initial_value.minor <= 0 {
+        throw("investments: CAGR needs a positive initial value")
+    }
+    if final_value.minor < 0 {
+        throw("investments: CAGR needs a final value that is not negative")
+    }
+    let y = require_shares(years)
+    let growth = 0
+    if final_value.minor > 0 {
+        growth = pow(final_value.minor / initial_value.minor, y.den / y.num)
+    }
+    let value = growth - 1
+    let scaled = value * 1000000000000
+    let rounded = floor(abs(scaled) + 0.5)
+    if scaled < 0 {
+        rounded = 0 - rounded
+    }
+    return {rate: {num: rounded, den: rates.MICRO}, float: value}
+}
+
+# [{symbol, value, weight_bp}] sorted by value descending; weights sum to 10,000.
+export def allocation(holdings) {
+    if type(holdings) != "list" or len(holdings) == 0 {
+        throw("investments: allocation needs at least one holding {symbol, lots, current_price}")
+    }
+    let items = []
+    for h in holdings {
+        if type(h) != "dict" or not ("symbol" in h) or not ("lots" in h) or not ("current_price" in h) {
+            throw("investments: each holding must be {symbol, lots, current_price}, got " + str(h))
+        }
+        append(items, {symbol: h.symbol, value: position_value(h.lots, h.current_price)})
+    }
+    return allocation_of_values(items)
+}
+
+# The same from values already computed: [{symbol, value (money)}].
+export def allocation_of_values(items) {
+    if type(items) != "list" or len(items) == 0 {
+        throw("investments: allocation needs at least one value")
+    }
+    let total = {value: 0}
+    for item in items {
+        money.check_same_unit(items[0].value, item.value)
+        total["value"] = total.value + item.value.minor
+    }
+    if total.value <= 0 {
+        throw("investments: allocation needs a portfolio worth more than zero")
+    }
+    # Sort by value descending (stable insertion sort: ties keep input order).
+    let order = []
+    for i = 0 to len(items) - 1 {
+        append(order, i)
+        let j = len(order) - 1
+        while j > 0 and items[order[j]].value.minor > items[order[j - 1]].value.minor {
+            let held = order[j]
+            order[j] = order[j - 1]
+            order[j - 1] = held
+            j = j - 1
+        }
+    }
+    let weights = []
+    let remainders = []
+    let assigned = {bp: 0}
+    for i in order {
+        let share = items[i].value.minor * BASIS_POINTS
+        append(weights, share // total.value)
+        append(remainders, share % total.value)
+        assigned["bp"] = assigned.bp + share // total.value
+    }
+    # Hand out the leftover basis points to the largest remainders (in
+    # sorted order on ties, i.e. larger value first, then earlier holding).
+    let left = BASIS_POINTS - assigned.bp
+    while left > 0 {
+        let best = {k: -1}
+        for k = 0 to len(order) - 1 {
+            if remainders[k] >= 0 and (best.k < 0 or remainders[k] > remainders[best.k]) {
+                best["k"] = k
+            }
+        }
+        weights[best.k] = weights[best.k] + 1
+        remainders[best.k] = -1
+        left = left - 1
+    }
+    let result = []
+    for k = 0 to len(order) - 1 {
+        let item = items[order[k]]
+        append(result, {symbol: item.symbol, value: item.value, weight_bp: weights[k]})
+    }
+    return result
+}

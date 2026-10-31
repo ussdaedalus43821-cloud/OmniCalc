@@ -14,6 +14,7 @@
 import "../core/parse.nova" as parse
 import "../core/money.nova" as money
 import "../core/rates.nova" as rates
+import "../core/dates.nova" as dates
 
 export let CURRENCY = "USD"
 export let SCALE = 2
@@ -57,4 +58,28 @@ export def count(text, what, least, most) {
         throw("parse: " + what + " must be " + str(least) + "-" + str(most) + ", got " + str(value))
     }
     return value
+}
+
+# Shares as typed ("12", "0.5", "3.141592") -> an exact positive fraction
+# {num, den}, up to 6 decimal places (den = 1,000,000).
+export let SHARES_SCALE = 6
+export def shares(text, what) {
+    let micro = parse.decimal(text, SHARES_SCALE, what)
+    if micro <= 0 {
+        throw("parse: " + what + " must be positive")
+    }
+    return {num: micro, den: pow(10, SHARES_SCALE)}
+}
+
+# "YYYY-MM-DD" -> a dates.nova serial (validated: 2025-02-30 is rejected).
+# One regex() checks the whole shape, so each part is known to be plain digits
+# and num() converts it directly - three full decimal parses per date cost
+# ~150 interpreter steps (M7: a 24-lot portfolio parses 24 dates).
+export def date(text, what) {
+    let body = trim(text)
+    if not regex("^[0-9]{4}-[0-9]{2}-[0-9]{2}\\Z", body) {
+        throw("parse: " + what + " \"" + text + "\" must be a date like 2024-03-15")
+    }
+    let parts = split(body, "-")
+    return dates.from_civil(num(parts[0]), num(parts[1]), num(parts[2])).serial
 }

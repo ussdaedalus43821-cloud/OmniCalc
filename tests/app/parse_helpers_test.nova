@@ -1,5 +1,5 @@
 # module: parse_helpers
-# expect: 18
+# expect: 23
 #
 # Every edge case that used to be spread over three facades' private copies.
 
@@ -35,5 +35,15 @@ t.check_throws("count: above the range", count_high, "months must be 1-1200, got
 def count_fraction() { inputs.count("12.5", "months", 1, 1200) }
 t.check_throws("count: a fraction", count_fraction, "has more than 0 decimal places")
 t.check("constants", [inputs.CURRENCY, inputs.SCALE, inputs.RATE_INPUT_SCALE, inputs.MONTHS_PER_YEAR], ["USD", 2, 4, 12])
+
+# ---- added in M7: shares and dates ----
+t.check("shares: fractional, exact", inputs.shares("12.345678", "shares"), {num: 12345678, den: 1000000})
+def shares_seven_places() { inputs.shares("0.1234567", "shares") }
+t.check_throws("shares: more than 6 decimals", shares_seven_places, "has more than 6 decimal places")
+t.check("date: ISO text to a serial", inputs.date("2026-10-31", "date"), 20757)
+def date_shape() { inputs.date("31/10/2026", "purchase date") }
+t.check_throws("date: wrong shape", date_shape, "must be a date like 2024-03-15")
+def date_impossible() { inputs.date("2025-02-29", "purchase date") }
+t.check_throws("date: not a real day", date_impossible, "day 29 is not in 2025-2")
 
 t.finish()

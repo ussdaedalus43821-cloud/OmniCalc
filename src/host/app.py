@@ -23,6 +23,7 @@ Tkinter or a display, so it can be tested headless.
 
 import argparse
 import csv
+import datetime
 import os
 import sys
 import time
@@ -43,6 +44,8 @@ BUDGET_MS = 100
 #                                        `default` is the starting rows
 # "summary" items are (result key, label, kind); kinds: "money" (an int at
 # the result's scale), "count", "percent" ({value, scale}), "text", and
+# "decimal" ({value, scale}, e.g. fractional shares), "percent" with no value
+# ({}) shown as "-", and
 # "phrase" ({before, amount, after}: words around a money amount, so the
 # facade decides how a number reads - "saves X" vs "costs X more"; amount
 # may be absent, e.g. "no target in this mode"). The
@@ -106,6 +109,26 @@ SCREENS = [
             ("monthly_savings", "Monthly change", "money"),
             ("break_even", "Break-even", "text"),
             ("savings_over_remaining_term", "Net over the shorter term only", "money"),
+        ],
+    },
+    {
+        "key": "investments",
+        "title": "Investments",
+        "facade": os.path.join("src", "app", "investments_screen.nova"),
+        "fields": [
+            ("positions", "Positions (one row per purchase lot)", [
+                ["VTI", "10", "150.00", "195.17", "2023-01-15"],
+                ["VTI", "5", "180.00", "195.17", "2023-08-01"],
+                ["BND", "2.4", "210.50", "220.10", "2022-06-30"],
+            ], {"rows": ["Symbol", "Shares", "Cost / share", "Current price", "Bought (YYYY-MM-DD)"]}),
+            ("as_of", "As of (YYYY-MM-DD)", datetime.date.today().isoformat()),
+        ],
+        "summary": [
+            ("total_value", "Value", "money"),
+            ("total_cost", "Cost basis", "money"),
+            ("total_gain", "Gain", "money"),
+            ("total_gain_pct", "Gain %", "percent"),
+            ("portfolio_return", "Annualized (XIRR)", "percent"),
         ],
     },
     {
@@ -184,7 +207,11 @@ def format_value(value, kind, scale, grouping=True):
     if kind == "money":
         return format_minor(value, scale, grouping)
     if kind == "percent":
+        if "value" not in value:
+            return "-"
         return format_minor(value["value"], value["scale"], grouping) + "%"
+    if kind == "decimal":
+        return format_minor(value["value"], value["scale"], grouping)
     if kind == "phrase":
         if "amount" not in value:
             return "".join([value["before"], value["after"]])
@@ -329,8 +356,21 @@ def build_tab(notebook, screen, debug, tk, ttk, filedialog):
     table.configure(yscrollcommand=scroll.set)
     table.pack(side="left", fill="both", expand=True)
     scroll.pack(side="right", fill="y")
+    extra_frame = ttk.Frame(frame, padding=(10, 0))
+    extra_frame.pack(fill="x")
+    extra_tables = []
     assumptions = ttk.Label(frame, text="", padding=(10, 0, 10, 10), justify="left", wraplength=940)
     assumptions.pack(fill="x")
+
+    def fill(view, columns, kinds, rows, scale):
+        if tuple(view["columns"]) != tuple(columns):
+            view["columns"] = columns
+            for name, kind in zip(columns, kinds):
+                view.heading(name, text=name.replace("_", " ").capitalize())
+                view.column(name, anchor="w" if kind == "text" else "e", width=110)
+        view.delete(*view.get_children())
+        for row in rows:
+            view.insert("", "end", values=[format_value(value, kind, scale) for value, kind in zip(row, kinds)])
 
     def on_calculate():
         start = time.perf_counter()
@@ -346,14 +386,16 @@ def build_tab(notebook, screen, debug, tk, ttk, filedialog):
         scale = result["scale"]
         for value_label, (key, label, kind) in zip(labels, screen["summary"]):
             value_label.config(text=label + ": " + format_value(result[key], kind, scale))
-        if tuple(table["columns"]) != tuple(result["columns"]):
-            table["columns"] = result["columns"]
-            for name, kind in zip(result["columns"], result["column_kinds"]):
-                table.heading(name, text=name.replace("_", " ").capitalize())
-                table.column(name, anchor="w" if kind == "text" else "e", width=125)
-        table.delete(*table.get_children())
-        for row in result["rows"]:
-            table.insert("", "end", values=[format_value(value, kind, scale) for value, kind in zip(row, result["column_kinds"])])
+        fill(table, result["columns"], result["column_kinds"], result["rows"], scale)
+        for spec in result.get("extra_tables", []):
+            if len(extra_tables) < len(result.get("extra_tables", [])):
+                box = ttk.LabelFrame(extra_frame, text=spec["title"], padding=4)
+                box.pack(fill="x", pady=(4, 0))
+                view = ttk.Treeview(box, show="headings", height=6)
+                view.pack(fill="x")
+                extra_tables.append(view)
+        for view, spec in zip(extra_tables, result.get("extra_tables", [])):
+            fill(view, spec["columns"], spec["column_kinds"], spec["rows"], scale)
         assumptions.config(text="Assumptions: " + " ".join(result["assumptions"]))
         total_ms = elapsed_ms(start)
         timing_label.config(text="{:.0f} ms".format(total_ms) if debug else "")
