@@ -514,7 +514,13 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
   - on every push and PR: `tools/run_tests.py` and the host `unittest` suite;
   - nightly (cron, 07:17 UTC): the `--bootstrap` job and the performance monitor.
   - **Performance baseline:** `tools/perf_baseline.json` comes from a CI run's log, never from a
-    dev machine; this container runs about 40% slower and trips every alert. The perf job also
+    dev machine.
+  - **Calibrated:** hosted runners vary up to about 1.8× between runs. Every screen, including
+    unchanged code, ran 1.74–1.82× slower on one runner than on another. So each run also times a
+    fixed NovaLang workload, and the gate compares each screen's **median ÷ calibration**
+    (`relative`), alerting at +20%.
+  - The relative values carry across machines: CI 0.360 / 0.140 / 0.533 / 0.123 vs this container
+    0.37 / 0.15 / 0.57 / 0.13, with raw speeds 1.5× apart. The perf job also
     runs on push, but only reports there (`continue-on-error`). To re-baseline, run the workflow
     with `update_baseline: true`, which opens a PR. That needs the workflow on the default branch
     and "Allow GitHub Actions to create and approve pull requests" enabled; otherwise, copy the

@@ -1,31 +1,12 @@
 {
-  "source": "GitHub Actions run 41235056992 (push of ee8c6d0), ubuntu-latest, job 'Performance monitor', copied verbatim from its log",
+  "source": "GitHub Actions run 41243936952 (push of e7d2a5a), ubuntu-latest, job 'Performance monitor', copied verbatim from its log. The gate compares 'relative' (median / calibration), not raw ms.",
   "python": "3.12.15",
   "machine": "x86_64",
+  "calibration_ms": 139.03,
   "screens": {
-    "amortization": {
-      "median_ms": 25.63,
-      "p90_ms": 28.19,
-      "max_ms": 42.15,
-      "runs": 20
-    },
-    "savings": {
-      "median_ms": 9.41,
-      "p90_ms": 12.74,
-      "max_ms": 15.54,
-      "runs": 20
-    },
-    "refinance": {
-      "median_ms": 37.16,
-      "p90_ms": 37.71,
-      "max_ms": 38.14,
-      "runs": 20
-    },
-    "debt_payoff": {
-      "median_ms": 8.74,
-      "p90_ms": 8.92,
-      "max_ms": 8.97,
-      "runs": 20
-    }
+    "amortization": {"median_ms": 50.04, "p90_ms": 50.4, "max_ms": 51.03, "runs": 20, "relative": 0.36},
+    "savings": {"median_ms": 19.48, "p90_ms": 19.64, "max_ms": 20.96, "runs": 20, "relative": 0.14},
+    "refinance": {"median_ms": 74.14, "p90_ms": 76.58, "max_ms": 77.13, "runs": 20, "relative": 0.533},
+    "debt_payoff": {"median_ms": 17.08, "p90_ms": 17.48, "max_ms": 17.77, "runs": 20, "relative": 0.123}
   }
 }

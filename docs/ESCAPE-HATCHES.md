@@ -202,6 +202,13 @@ These were checked against the budget and stay in NovaLang. Re-measure if inputs
   `payoff_plan`'s inner loop. First, skip paid-off debts by keeping an open-index list. Re-measure
   before and after.
 
+### The perf gate is calibrated (2026-10-31)
+- On the PR #1 push, every screen ran 1.74–1.82× slower than in the baseline run, including debt
+  payoff, whose code had not changed. That was the runner, not a regression. A raw-ms gate would
+  have false-alarmed nightly.
+- `tools/perf.py` now times a fixed NovaLang workload in the same process and gates on
+  median ÷ calibration. The baseline is re-taken from CI run 41243936952.
+
 ## Known approximations
 
 Behavior that is deliberately not exact.
