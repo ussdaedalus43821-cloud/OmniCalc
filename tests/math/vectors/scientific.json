@@ -1,0 +1,909 @@
+{
+ "digits": 12,
+ "cases": [
+  {
+   "text": "3 + 4 * (2 - 1)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 7,
+   "den": 1,
+   "display": "7",
+   "exact_text": "",
+   "note": "the brief's example"
+  },
+  {
+   "text": "2 + 3 * 4",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 14,
+   "den": 1,
+   "display": "14",
+   "exact_text": "",
+   "note": "* binds tighter than +"
+  },
+  {
+   "text": "(2 + 3) * 4",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 20,
+   "den": 1,
+   "display": "20",
+   "exact_text": "",
+   "note": ""
+  },
+  {
+   "text": "10 - 4 - 3",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 3,
+   "den": 1,
+   "display": "3",
+   "exact_text": "",
+   "note": "left-associative -"
+  },
+  {
+   "text": "100 / 10 / 5",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 2,
+   "den": 1,
+   "display": "2",
+   "exact_text": "",
+   "note": "left-associative /"
+  },
+  {
+   "text": "-2^2",
+   "angle": "rad",
+   "kind": "exact",
+   "num": -4,
+   "den": 1,
+   "display": "-4",
+   "exact_text": "",
+   "note": "unary minus binds looser than ^ (maths convention)"
+  },
+  {
+   "text": "(-2)^2",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 4,
+   "den": 1,
+   "display": "4",
+   "exact_text": "",
+   "note": ""
+  },
+  {
+   "text": "2^-1",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 1,
+   "den": 2,
+   "display": "0.5",
+   "exact_text": "1/2",
+   "note": "signed exponent"
+  },
+  {
+   "text": "2^3^2",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 512,
+   "den": 1,
+   "display": "512",
+   "exact_text": "",
+   "note": "^ is right-associative"
+  },
+  {
+   "text": "3!^2",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 36,
+   "den": 1,
+   "display": "36",
+   "exact_text": "",
+   "note": "postfix ! binds tighter than ^"
+  },
+  {
+   "text": "-3!",
+   "angle": "rad",
+   "kind": "exact",
+   "num": -6,
+   "den": 1,
+   "display": "-6",
+   "exact_text": "",
+   "note": ""
+  },
+  {
+   "text": "--5",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 5,
+   "den": 1,
+   "display": "5",
+   "exact_text": "",
+   "note": "repeated unary minus"
+  },
+  {
+   "text": "+7",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 7,
+   "den": 1,
+   "display": "7",
+   "exact_text": "",
+   "note": ""
+  },
+  {
+   "text": "  1+2  ",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 3,
+   "den": 1,
+   "display": "3",
+   "exact_text": "",
+   "note": "whitespace ignored"
+  },
+  {
+   "text": "2 × 3 ÷ 4 − 1",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 1,
+   "den": 2,
+   "display": "0.5",
+   "exact_text": "1/2",
+   "note": "unicode operator aliases"
+  },
+  {
+   "text": "3²",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 9,
+   "den": 1,
+   "display": "9",
+   "exact_text": "",
+   "note": "superscript square"
+  },
+  {
+   "text": "2³",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 8,
+   "den": 1,
+   "display": "8",
+   "exact_text": "",
+   "note": "superscript cube"
+  },
+  {
+   "text": "0.1 + 0.2",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 3,
+   "den": 10,
+   "display": "0.3",
+   "exact_text": "3/10",
+   "note": "decimal literals are exact: 0.3, not 0.30000000000000004"
+  },
+  {
+   "text": "1/3",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 1,
+   "den": 3,
+   "display": "0.333333333333",
+   "exact_text": "1/3",
+   "note": "non-terminating: rounded display + exact 1/3"
+  },
+  {
+   "text": "2/3",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 2,
+   "den": 3,
+   "display": "0.666666666667",
+   "exact_text": "2/3",
+   "note": "half-up at the 12th figure: ...667"
+  },
+  {
+   "text": "1/8",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 1,
+   "den": 8,
+   "display": "0.125",
+   "exact_text": "1/8",
+   "note": "terminating decimal shown exactly"
+  },
+  {
+   "text": "1/3 + 1/6",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 1,
+   "den": 2,
+   "display": "0.5",
+   "exact_text": "1/2",
+   "note": ""
+  },
+  {
+   "text": "1.5e-3",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 3,
+   "den": 2000,
+   "display": "0.0015",
+   "exact_text": "3/2000",
+   "note": "exponent notation, exact"
+  },
+  {
+   "text": "2e3 + .5",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 4001,
+   "den": 2,
+   "display": "2000.5",
+   "exact_text": "4001/2",
+   "note": "2e3 and a leading-dot literal"
+  },
+  {
+   "text": "123456789 * 987654321",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 121932631112635269,
+   "den": 1,
+   "display": "121932631112635269",
+   "exact_text": "",
+   "note": "big integers stay exact"
+  },
+  {
+   "text": "2^100",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 1267650600228229401496703205376,
+   "den": 1,
+   "display": "1267650600228229401496703205376",
+   "exact_text": "",
+   "note": "exact integer power, 31 digits, shown in full"
+  },
+  {
+   "text": "(2/3)^3",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 8,
+   "den": 27,
+   "display": "0.296296296296",
+   "exact_text": "8/27",
+   "note": ""
+  },
+  {
+   "text": "(1/2)^-3",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 8,
+   "den": 1,
+   "display": "8",
+   "exact_text": "",
+   "note": ""
+  },
+  {
+   "text": "8^(1/3)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 2,
+   "den": 1,
+   "display": "2",
+   "exact_text": "",
+   "note": "exact rational root"
+  },
+  {
+   "text": "(-8)^(1/3)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": -2,
+   "den": 1,
+   "display": "-2",
+   "exact_text": "",
+   "note": "odd root of a negative base"
+  },
+  {
+   "text": "(9/4)^(1/2)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 3,
+   "den": 2,
+   "display": "1.5",
+   "exact_text": "3/2",
+   "note": ""
+  },
+  {
+   "text": "16^(3/4)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 8,
+   "den": 1,
+   "display": "8",
+   "exact_text": "",
+   "note": ""
+  },
+  {
+   "text": "sqrt(144)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 12,
+   "den": 1,
+   "display": "12",
+   "exact_text": "",
+   "note": "perfect square stays exact"
+  },
+  {
+   "text": "sqrt(2.25)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 3,
+   "den": 2,
+   "display": "1.5",
+   "exact_text": "3/2",
+   "note": ""
+  },
+  {
+   "text": "root(1000, 3)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 10,
+   "den": 1,
+   "display": "10",
+   "exact_text": "",
+   "note": ""
+  },
+  {
+   "text": "10!",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 3628800,
+   "den": 1,
+   "display": "3628800",
+   "exact_text": "",
+   "note": ""
+  },
+  {
+   "text": "0!",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 1,
+   "den": 1,
+   "display": "1",
+   "exact_text": "",
+   "note": ""
+  },
+  {
+   "text": "25!",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 15511210043330985984000000,
+   "den": 1,
+   "display": "15511210043330985984000000",
+   "exact_text": "",
+   "note": "26 digits, exact"
+  },
+  {
+   "text": "ncr(52, 5)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 2598960,
+   "den": 1,
+   "display": "2598960",
+   "exact_text": "",
+   "note": ""
+  },
+  {
+   "text": "npr(10, 3)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 720,
+   "den": 1,
+   "display": "720",
+   "exact_text": "",
+   "note": ""
+  },
+  {
+   "text": "gcd(462, 1071)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 21,
+   "den": 1,
+   "display": "21",
+   "exact_text": "",
+   "note": ""
+  },
+  {
+   "text": "lcm(4, 6)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 12,
+   "den": 1,
+   "display": "12",
+   "exact_text": "",
+   "note": ""
+  },
+  {
+   "text": "abs(-7/2)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 7,
+   "den": 2,
+   "display": "3.5",
+   "exact_text": "7/2",
+   "note": ""
+  },
+  {
+   "text": "floor(-7/2)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": -4,
+   "den": 1,
+   "display": "-4",
+   "exact_text": "",
+   "note": ""
+  },
+  {
+   "text": "ceil(-7/2)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": -3,
+   "den": 1,
+   "display": "-3",
+   "exact_text": "",
+   "note": ""
+  },
+  {
+   "text": "round(2.5)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 3,
+   "den": 1,
+   "display": "3",
+   "exact_text": "",
+   "note": "half-up, the house rule (not banker's)"
+  },
+  {
+   "text": "round(-2.5)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": -3,
+   "den": 1,
+   "display": "-3",
+   "exact_text": "",
+   "note": "halves away from zero"
+  },
+  {
+   "text": "round(3.14159, 2)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 157,
+   "den": 50,
+   "display": "3.14",
+   "exact_text": "157/50",
+   "note": ""
+  },
+  {
+   "text": "mod(-7, 3)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 2,
+   "den": 1,
+   "display": "2",
+   "exact_text": "",
+   "note": "floored modulo: sign of the divisor"
+  },
+  {
+   "text": "mod(7, -3)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": -2,
+   "den": 1,
+   "display": "-2",
+   "exact_text": "",
+   "note": ""
+  },
+  {
+   "text": "min(3, 1/2, 2)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 1,
+   "den": 2,
+   "display": "0.5",
+   "exact_text": "1/2",
+   "note": ""
+  },
+  {
+   "text": "max(-1, -1/3)",
+   "angle": "rad",
+   "kind": "exact",
+   "num": -1,
+   "den": 3,
+   "display": "-0.333333333333",
+   "exact_text": "-1/3",
+   "note": ""
+  },
+  {
+   "text": "1/3 * 3",
+   "angle": "rad",
+   "kind": "exact",
+   "num": 1,
+   "den": 1,
+   "display": "1",
+   "exact_text": "",
+   "note": "exact rationals cancel"
+  },
+  {
+   "text": "sqrt(2)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "1.4142135623730951",
+   "display": "1.41421356237",
+   "note": "not a perfect square: float"
+  },
+  {
+   "text": "2^0.5",
+   "angle": "rad",
+   "kind": "float",
+   "value": "1.4142135623730951",
+   "display": "1.41421356237",
+   "note": "irrational power: float"
+  },
+  {
+   "text": "pi",
+   "angle": "rad",
+   "kind": "float",
+   "value": "3.141592653589793",
+   "display": "3.14159265359",
+   "note": ""
+  },
+  {
+   "text": "e",
+   "angle": "rad",
+   "kind": "float",
+   "value": "2.718281828459045",
+   "display": "2.71828182846",
+   "note": ""
+  },
+  {
+   "text": "2 * pi",
+   "angle": "rad",
+   "kind": "float",
+   "value": "6.283185307179586",
+   "display": "6.28318530718",
+   "note": ""
+  },
+  {
+   "text": "sin(pi / 6)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "0.49999999999999994",
+   "display": "0.5",
+   "note": "0.49999999999999994, displays 0.5"
+  },
+  {
+   "text": "cos(0)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "1.0",
+   "display": "1",
+   "note": ""
+  },
+  {
+   "text": "tan(1)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "1.5574077246549023",
+   "display": "1.55740772465",
+   "note": ""
+  },
+  {
+   "text": "sin(30)",
+   "angle": "deg",
+   "kind": "float",
+   "value": "0.49999999999999994",
+   "display": "0.5",
+   "note": "degree mode"
+  },
+  {
+   "text": "cos(60)",
+   "angle": "deg",
+   "kind": "float",
+   "value": "0.5000000000000001",
+   "display": "0.5",
+   "note": ""
+  },
+  {
+   "text": "tan(45)",
+   "angle": "deg",
+   "kind": "float",
+   "value": "0.9999999999999999",
+   "display": "1",
+   "note": ""
+  },
+  {
+   "text": "atan(1)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "0.7853981633974483",
+   "display": "0.785398163397",
+   "note": "NovaLang has no atan built-in"
+  },
+  {
+   "text": "atan(1)",
+   "angle": "deg",
+   "kind": "float",
+   "value": "45.0",
+   "display": "45",
+   "note": "inverse trig returns degrees in deg mode"
+  },
+  {
+   "text": "asin(0.5)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "0.5235987755982989",
+   "display": "0.523598775598",
+   "note": ""
+  },
+  {
+   "text": "acos(-1)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "3.141592653589793",
+   "display": "3.14159265359",
+   "note": ""
+  },
+  {
+   "text": "atan(1e6)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "1.5707953267948966",
+   "display": "1.57079532679",
+   "note": "argument reduction for large x"
+  },
+  {
+   "text": "atan(-0.3)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "-0.2914567944778671",
+   "display": "-0.291456794478",
+   "note": ""
+  },
+  {
+   "text": "atan2(-1, -1)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "-2.356194490192345",
+   "display": "-2.35619449019",
+   "note": "quadrant-aware"
+  },
+  {
+   "text": "exp(1)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "2.718281828459045",
+   "display": "2.71828182846",
+   "note": "NovaLang has no exp built-in"
+  },
+  {
+   "text": "exp(-2.5)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "0.0820849986238988",
+   "display": "0.0820849986239",
+   "note": ""
+  },
+  {
+   "text": "ln(10)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "2.302585092994046",
+   "display": "2.30258509299",
+   "note": ""
+  },
+  {
+   "text": "log10(2)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "0.3010299956639812",
+   "display": "0.301029995664",
+   "note": ""
+  },
+  {
+   "text": "log2(10)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "3.321928094887362",
+   "display": "3.32192809489",
+   "note": ""
+  },
+  {
+   "text": "log(8, 2)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "3.0",
+   "display": "3",
+   "note": "our log(x, base), never NovaLang's logger"
+  },
+  {
+   "text": "sinh(1)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "1.1752011936438014",
+   "display": "1.17520119364",
+   "note": ""
+  },
+  {
+   "text": "cosh(1)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "1.5430806348152437",
+   "display": "1.54308063482",
+   "note": ""
+  },
+  {
+   "text": "tanh(0.5)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "0.46211715726000974",
+   "display": "0.46211715726",
+   "note": ""
+  },
+  {
+   "text": "1 / 3 + pi",
+   "angle": "rad",
+   "kind": "float",
+   "value": "3.4749259869231266",
+   "display": "3.47492598692",
+   "note": "exact + float -> float"
+  },
+  {
+   "text": "2^100 * 1.0 * pi",
+   "angle": "rad",
+   "kind": "float",
+   "value": "3.982441812995697e+30",
+   "display": "3.982441813e+30",
+   "note": "large: scientific notation"
+  },
+  {
+   "text": "exp(-20)",
+   "angle": "rad",
+   "kind": "float",
+   "value": "2.061153622438558e-09",
+   "display": "2.06115362244e-09",
+   "note": "small: scientific notation"
+  },
+  {
+   "text": "1e-3 * pi",
+   "angle": "rad",
+   "kind": "float",
+   "value": "0.0031415926535897933",
+   "display": "0.00314159265359",
+   "note": "0.00314... stays plain (exponent -3)"
+  },
+  {
+   "text": "1 / 0",
+   "angle": "rad",
+   "error": "division by zero",
+   "note": ""
+  },
+  {
+   "text": "1 / (2 - 2)",
+   "angle": "rad",
+   "error": "division by zero",
+   "note": ""
+  },
+  {
+   "text": "sqrt(-1)",
+   "angle": "rad",
+   "error": "not a real number",
+   "note": ""
+  },
+  {
+   "text": "(-8)^(1/2)",
+   "angle": "rad",
+   "error": "not a real number",
+   "note": ""
+  },
+  {
+   "text": "0^-1",
+   "angle": "rad",
+   "error": "division by zero",
+   "note": ""
+  },
+  {
+   "text": "ln(0)",
+   "angle": "rad",
+   "error": "ln needs a number greater than zero",
+   "note": ""
+  },
+  {
+   "text": "asin(2)",
+   "angle": "rad",
+   "error": "asin needs a number from -1 to 1",
+   "note": ""
+  },
+  {
+   "text": "1001!",
+   "angle": "rad",
+   "error": "factorial needs a whole number from 0 to 1000",
+   "note": ""
+  },
+  {
+   "text": "2.5!",
+   "angle": "rad",
+   "error": "factorial needs a whole number from 0 to 1000",
+   "note": ""
+  },
+  {
+   "text": "3 +",
+   "angle": "rad",
+   "error": "unexpected end",
+   "note": ""
+  },
+  {
+   "text": "(1 + 2",
+   "angle": "rad",
+   "error": "missing \")\"",
+   "note": ""
+  },
+  {
+   "text": "1 + 2)",
+   "angle": "rad",
+   "error": "unexpected \")\" at position 5",
+   "note": ""
+  },
+  {
+   "text": "2 pi",
+   "angle": "rad",
+   "error": "missing operator",
+   "note": ""
+  },
+  {
+   "text": "2(3)",
+   "angle": "rad",
+   "error": "missing operator",
+   "note": ""
+  },
+  {
+   "text": "sine(1)",
+   "angle": "rad",
+   "error": "unknown function \"sine\" at position 0",
+   "note": ""
+  },
+  {
+   "text": "foo + 1",
+   "angle": "rad",
+   "error": "unknown name \"foo\" at position 0",
+   "note": ""
+  },
+  {
+   "text": "sqrt(1, 2)",
+   "angle": "rad",
+   "error": "sqrt takes 1 argument, got 2",
+   "note": ""
+  },
+  {
+   "text": "1 $ 2",
+   "angle": "rad",
+   "error": "unexpected character \"$\" at position 2",
+   "note": ""
+  },
+  {
+   "text": "",
+   "angle": "rad",
+   "error": "enter an expression",
+   "note": ""
+  },
+  {
+   "text": "1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1",
+   "angle": "rad",
+   "error": "at most 500 characters",
+   "note": ""
+  },
+  {
+   "text": "exp(1000)",
+   "angle": "rad",
+   "error": "not a finite number",
+   "note": "float overflow is an error, not inf"
+  }
+ ]
+}

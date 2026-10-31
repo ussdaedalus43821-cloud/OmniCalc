@@ -1,0 +1,768 @@
+{
+ "version": 1,
+ "about": "OmniCalc unit table. factor converts one unit to its category's base unit (temperature: base = (x + offset) * factor, in kelvin). Factors are exact decimals or num/den by definition; tests/math/gen_math_vectors.py re-derives every one independently.",
+ "categories": {
+  "length": "m",
+  "area": "m2",
+  "volume": "m3",
+  "mass": "kg",
+  "time": "s",
+  "speed": "m/s",
+  "temperature": "K",
+  "pressure": "Pa",
+  "energy": "J",
+  "power": "W",
+  "data": "B"
+ },
+ "units": [
+  {
+   "symbol": "m",
+   "name": "metre",
+   "category": "length",
+   "factor": "1",
+   "aliases": [
+    "meter",
+    "meters",
+    "metres"
+   ]
+  },
+  {
+   "symbol": "km",
+   "name": "kilometre",
+   "category": "length",
+   "factor": "1000",
+   "aliases": [
+    "kilometer",
+    "kilometers"
+   ]
+  },
+  {
+   "symbol": "cm",
+   "name": "centimetre",
+   "category": "length",
+   "factor": "0.01"
+  },
+  {
+   "symbol": "mm",
+   "name": "millimetre",
+   "category": "length",
+   "factor": "0.001"
+  },
+  {
+   "symbol": "um",
+   "name": "micrometre",
+   "category": "length",
+   "factor": "0.000001",
+   "aliases": [
+    "µm",
+    "micron"
+   ]
+  },
+  {
+   "symbol": "nm",
+   "name": "nanometre",
+   "category": "length",
+   "factor": "0.000000001"
+  },
+  {
+   "symbol": "in",
+   "name": "inch",
+   "category": "length",
+   "factor": "0.0254",
+   "aliases": [
+    "inch",
+    "inches"
+   ],
+   "source": "international inch, exact (1959)"
+  },
+  {
+   "symbol": "ft",
+   "name": "foot",
+   "category": "length",
+   "factor": "0.3048",
+   "aliases": [
+    "foot",
+    "feet"
+   ],
+   "source": "12 in"
+  },
+  {
+   "symbol": "yd",
+   "name": "yard",
+   "category": "length",
+   "factor": "0.9144",
+   "aliases": [
+    "yard",
+    "yards"
+   ],
+   "source": "3 ft"
+  },
+  {
+   "symbol": "mi",
+   "name": "mile",
+   "category": "length",
+   "factor": "1609.344",
+   "aliases": [
+    "mile",
+    "miles"
+   ],
+   "source": "5280 ft"
+  },
+  {
+   "symbol": "nmi",
+   "name": "nautical mile",
+   "category": "length",
+   "factor": "1852",
+   "source": "1852 m, exact"
+  },
+  {
+   "symbol": "m2",
+   "name": "square metre",
+   "category": "area",
+   "factor": "1",
+   "aliases": [
+    "m^2",
+    "sqm"
+   ]
+  },
+  {
+   "symbol": "km2",
+   "name": "square kilometre",
+   "category": "area",
+   "factor": "1000000",
+   "aliases": [
+    "km^2"
+   ]
+  },
+  {
+   "symbol": "cm2",
+   "name": "square centimetre",
+   "category": "area",
+   "factor": "0.0001",
+   "aliases": [
+    "cm^2"
+   ]
+  },
+  {
+   "symbol": "ha",
+   "name": "hectare",
+   "category": "area",
+   "factor": "10000",
+   "aliases": [
+    "hectare",
+    "hectares"
+   ]
+  },
+  {
+   "symbol": "acre",
+   "name": "acre",
+   "category": "area",
+   "factor": "4046.8564224",
+   "aliases": [
+    "acres"
+   ],
+   "source": "43560 ft^2 (international)"
+  },
+  {
+   "symbol": "ft2",
+   "name": "square foot",
+   "category": "area",
+   "factor": "0.09290304",
+   "aliases": [
+    "ft^2",
+    "sqft"
+   ]
+  },
+  {
+   "symbol": "in2",
+   "name": "square inch",
+   "category": "area",
+   "factor": "0.00064516",
+   "aliases": [
+    "in^2"
+   ]
+  },
+  {
+   "symbol": "mi2",
+   "name": "square mile",
+   "category": "area",
+   "factor": "2589988.110336",
+   "aliases": [
+    "mi^2"
+   ]
+  },
+  {
+   "symbol": "m3",
+   "name": "cubic metre",
+   "category": "volume",
+   "factor": "1",
+   "aliases": [
+    "m^3"
+   ]
+  },
+  {
+   "symbol": "L",
+   "name": "litre",
+   "category": "volume",
+   "factor": "0.001",
+   "aliases": [
+    "l",
+    "liter",
+    "liters",
+    "litre",
+    "litres"
+   ]
+  },
+  {
+   "symbol": "mL",
+   "name": "millilitre",
+   "category": "volume",
+   "factor": "0.000001",
+   "aliases": [
+    "ml"
+   ]
+  },
+  {
+   "symbol": "cm3",
+   "name": "cubic centimetre",
+   "category": "volume",
+   "factor": "0.000001",
+   "aliases": [
+    "cm^3",
+    "cc"
+   ]
+  },
+  {
+   "symbol": "gal",
+   "name": "US gallon",
+   "category": "volume",
+   "factor": "0.003785411784",
+   "aliases": [
+    "gallon",
+    "gallons"
+   ],
+   "source": "231 in^3"
+  },
+  {
+   "symbol": "qt",
+   "name": "US quart",
+   "category": "volume",
+   "factor": "0.000946352946",
+   "aliases": [
+    "quart",
+    "quarts"
+   ],
+   "source": "gal / 4"
+  },
+  {
+   "symbol": "pt",
+   "name": "US pint",
+   "category": "volume",
+   "factor": "0.000473176473",
+   "aliases": [
+    "pint",
+    "pints"
+   ],
+   "source": "qt / 2"
+  },
+  {
+   "symbol": "cup",
+   "name": "US cup",
+   "category": "volume",
+   "factor": "0.0002365882365",
+   "aliases": [
+    "cups"
+   ],
+   "source": "pt / 2"
+  },
+  {
+   "symbol": "floz",
+   "name": "US fluid ounce",
+   "category": "volume",
+   "factor": "0.0000295735295625",
+   "aliases": [
+    "fl oz"
+   ],
+   "source": "cup / 8"
+  },
+  {
+   "symbol": "tbsp",
+   "name": "US tablespoon",
+   "category": "volume",
+   "factor": "0.00001478676478125",
+   "aliases": [
+    "tablespoon"
+   ],
+   "source": "floz / 2"
+  },
+  {
+   "symbol": "tsp",
+   "name": "US teaspoon",
+   "category": "volume",
+   "factor": "0.00000492892159375",
+   "aliases": [
+    "teaspoon"
+   ],
+   "source": "tbsp / 3"
+  },
+  {
+   "symbol": "ft3",
+   "name": "cubic foot",
+   "category": "volume",
+   "factor": "0.028316846592",
+   "aliases": [
+    "ft^3"
+   ]
+  },
+  {
+   "symbol": "in3",
+   "name": "cubic inch",
+   "category": "volume",
+   "factor": "0.000016387064",
+   "aliases": [
+    "in^3"
+   ]
+  },
+  {
+   "symbol": "impgal",
+   "name": "imperial gallon",
+   "category": "volume",
+   "factor": "0.00454609",
+   "source": "4.54609 L, exact"
+  },
+  {
+   "symbol": "kg",
+   "name": "kilogram",
+   "category": "mass",
+   "factor": "1",
+   "aliases": [
+    "kilogram",
+    "kilograms"
+   ]
+  },
+  {
+   "symbol": "g",
+   "name": "gram",
+   "category": "mass",
+   "factor": "0.001",
+   "aliases": [
+    "gram",
+    "grams"
+   ]
+  },
+  {
+   "symbol": "mg",
+   "name": "milligram",
+   "category": "mass",
+   "factor": "0.000001"
+  },
+  {
+   "symbol": "t",
+   "name": "tonne",
+   "category": "mass",
+   "factor": "1000",
+   "aliases": [
+    "tonne",
+    "tonnes"
+   ]
+  },
+  {
+   "symbol": "lb",
+   "name": "pound",
+   "category": "mass",
+   "factor": "0.45359237",
+   "aliases": [
+    "lbs",
+    "pound",
+    "pounds"
+   ],
+   "source": "international pound, exact (1959)"
+  },
+  {
+   "symbol": "oz",
+   "name": "ounce",
+   "category": "mass",
+   "factor": "0.028349523125",
+   "aliases": [
+    "ounce",
+    "ounces"
+   ],
+   "source": "lb / 16"
+  },
+  {
+   "symbol": "st",
+   "name": "stone",
+   "category": "mass",
+   "factor": "6.35029318",
+   "aliases": [
+    "stone"
+   ],
+   "source": "14 lb"
+  },
+  {
+   "symbol": "ton",
+   "name": "short ton",
+   "category": "mass",
+   "factor": "907.18474",
+   "aliases": [
+    "short ton"
+   ],
+   "source": "2000 lb"
+  },
+  {
+   "symbol": "s",
+   "name": "second",
+   "category": "time",
+   "factor": "1",
+   "aliases": [
+    "sec",
+    "second",
+    "seconds"
+   ]
+  },
+  {
+   "symbol": "ms",
+   "name": "millisecond",
+   "category": "time",
+   "factor": "0.001"
+  },
+  {
+   "symbol": "min",
+   "name": "minute",
+   "category": "time",
+   "factor": "60",
+   "aliases": [
+    "minute",
+    "minutes"
+   ]
+  },
+  {
+   "symbol": "h",
+   "name": "hour",
+   "category": "time",
+   "factor": "3600",
+   "aliases": [
+    "hr",
+    "hour",
+    "hours"
+   ]
+  },
+  {
+   "symbol": "day",
+   "name": "day",
+   "category": "time",
+   "factor": "86400",
+   "aliases": [
+    "days",
+    "d"
+   ]
+  },
+  {
+   "symbol": "week",
+   "name": "week",
+   "category": "time",
+   "factor": "604800",
+   "aliases": [
+    "weeks",
+    "wk"
+   ]
+  },
+  {
+   "symbol": "m/s",
+   "name": "metre per second",
+   "category": "speed",
+   "factor": "1",
+   "aliases": [
+    "mps"
+   ]
+  },
+  {
+   "symbol": "km/h",
+   "name": "kilometre per hour",
+   "category": "speed",
+   "factor": "5/18",
+   "aliases": [
+    "kph",
+    "kmh"
+   ]
+  },
+  {
+   "symbol": "mph",
+   "name": "mile per hour",
+   "category": "speed",
+   "factor": "0.44704",
+   "source": "mi / h"
+  },
+  {
+   "symbol": "kn",
+   "name": "knot",
+   "category": "speed",
+   "factor": "463/900",
+   "aliases": [
+    "knot",
+    "knots",
+    "kt"
+   ],
+   "source": "nmi / h"
+  },
+  {
+   "symbol": "ft/s",
+   "name": "foot per second",
+   "category": "speed",
+   "factor": "0.3048",
+   "aliases": [
+    "fps"
+   ]
+  },
+  {
+   "symbol": "K",
+   "name": "kelvin",
+   "category": "temperature",
+   "factor": "1",
+   "offset": "0",
+   "aliases": [
+    "kelvin"
+   ]
+  },
+  {
+   "symbol": "degC",
+   "name": "degree Celsius",
+   "category": "temperature",
+   "factor": "1",
+   "offset": "273.15",
+   "aliases": [
+    "C",
+    "°C",
+    "celsius"
+   ]
+  },
+  {
+   "symbol": "degF",
+   "name": "degree Fahrenheit",
+   "category": "temperature",
+   "factor": "5/9",
+   "offset": "459.67",
+   "aliases": [
+    "F",
+    "°F",
+    "fahrenheit"
+   ]
+  },
+  {
+   "symbol": "degR",
+   "name": "degree Rankine",
+   "category": "temperature",
+   "factor": "5/9",
+   "offset": "0",
+   "aliases": [
+    "R",
+    "°R",
+    "rankine"
+   ]
+  },
+  {
+   "symbol": "Pa",
+   "name": "pascal",
+   "category": "pressure",
+   "factor": "1",
+   "aliases": [
+    "pascal"
+   ]
+  },
+  {
+   "symbol": "kPa",
+   "name": "kilopascal",
+   "category": "pressure",
+   "factor": "1000"
+  },
+  {
+   "symbol": "bar",
+   "name": "bar",
+   "category": "pressure",
+   "factor": "100000"
+  },
+  {
+   "symbol": "atm",
+   "name": "standard atmosphere",
+   "category": "pressure",
+   "factor": "101325",
+   "source": "101325 Pa, exact"
+  },
+  {
+   "symbol": "psi",
+   "name": "pound-force per square inch",
+   "category": "pressure",
+   "factor": "8896443230521/1290320000",
+   "source": "lbf / in^2, lbf = lb x 9.80665 m/s^2"
+  },
+  {
+   "symbol": "torr",
+   "name": "torr",
+   "category": "pressure",
+   "factor": "20265/152",
+   "source": "atm / 760"
+  },
+  {
+   "symbol": "mmHg",
+   "name": "millimetre of mercury",
+   "category": "pressure",
+   "factor": "133.322387415",
+   "source": "conventional, exact"
+  },
+  {
+   "symbol": "J",
+   "name": "joule",
+   "category": "energy",
+   "factor": "1",
+   "aliases": [
+    "joule",
+    "joules"
+   ]
+  },
+  {
+   "symbol": "kJ",
+   "name": "kilojoule",
+   "category": "energy",
+   "factor": "1000"
+  },
+  {
+   "symbol": "cal",
+   "name": "thermochemical calorie",
+   "category": "energy",
+   "factor": "4.184",
+   "aliases": [
+    "calorie"
+   ],
+   "source": "4.184 J, exact"
+  },
+  {
+   "symbol": "kcal",
+   "name": "kilocalorie",
+   "category": "energy",
+   "factor": "4184",
+   "aliases": [
+    "Cal"
+   ]
+  },
+  {
+   "symbol": "Wh",
+   "name": "watt-hour",
+   "category": "energy",
+   "factor": "3600"
+  },
+  {
+   "symbol": "kWh",
+   "name": "kilowatt-hour",
+   "category": "energy",
+   "factor": "3600000"
+  },
+  {
+   "symbol": "BTU",
+   "name": "British thermal unit (IT)",
+   "category": "energy",
+   "factor": "1055.05585262",
+   "aliases": [
+    "btu"
+   ],
+   "source": "IT, exact"
+  },
+  {
+   "symbol": "eV",
+   "name": "electronvolt",
+   "category": "energy",
+   "factor": "0.0000000000000000001602176634",
+   "source": "SI 2019, exact"
+  },
+  {
+   "symbol": "W",
+   "name": "watt",
+   "category": "power",
+   "factor": "1",
+   "aliases": [
+    "watt",
+    "watts"
+   ]
+  },
+  {
+   "symbol": "kW",
+   "name": "kilowatt",
+   "category": "power",
+   "factor": "1000"
+  },
+  {
+   "symbol": "hp",
+   "name": "mechanical horsepower",
+   "category": "power",
+   "factor": "745.69987158227022",
+   "source": "550 ft x lbf / s"
+  },
+  {
+   "symbol": "bit",
+   "name": "bit",
+   "category": "data",
+   "factor": "0.125",
+   "aliases": [
+    "bits",
+    "b"
+   ]
+  },
+  {
+   "symbol": "B",
+   "name": "byte",
+   "category": "data",
+   "factor": "1",
+   "aliases": [
+    "byte",
+    "bytes"
+   ]
+  },
+  {
+   "symbol": "kB",
+   "name": "kilobyte",
+   "category": "data",
+   "factor": "1000"
+  },
+  {
+   "symbol": "MB",
+   "name": "megabyte",
+   "category": "data",
+   "factor": "1000000"
+  },
+  {
+   "symbol": "GB",
+   "name": "gigabyte",
+   "category": "data",
+   "factor": "1000000000"
+  },
+  {
+   "symbol": "TB",
+   "name": "terabyte",
+   "category": "data",
+   "factor": "1000000000000"
+  },
+  {
+   "symbol": "KiB",
+   "name": "kibibyte",
+   "category": "data",
+   "factor": "1024"
+  },
+  {
+   "symbol": "MiB",
+   "name": "mebibyte",
+   "category": "data",
+   "factor": "1048576"
+  },
+  {
+   "symbol": "GiB",
+   "name": "gibibyte",
+   "category": "data",
+   "factor": "1073741824"
+  },
+  {
+   "symbol": "TiB",
+   "name": "tebibyte",
+   "category": "data",
+   "factor": "1099511627776"
+  }
+ ]
+}

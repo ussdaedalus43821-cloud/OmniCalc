@@ -1,0 +1,331 @@
+{
+ "cases": [
+  {
+   "value": "1",
+   "from": "ft",
+   "to": "in",
+   "num": 12,
+   "den": 1,
+   "display": "12",
+   "exact_text": "",
+   "note": "exactly 12"
+  },
+  {
+   "value": "1",
+   "from": "mi",
+   "to": "km",
+   "num": 25146,
+   "den": 15625,
+   "display": "1.609344",
+   "exact_text": "25146/15625",
+   "note": "exactly 1.609344"
+  },
+  {
+   "value": "100",
+   "from": "km/h",
+   "to": "mph",
+   "num": 781250,
+   "den": 12573,
+   "display": "62.1371192237",
+   "exact_text": "781250/12573",
+   "note": ""
+  },
+  {
+   "value": "26.2",
+   "from": "mi",
+   "to": "km",
+   "num": 3294126,
+   "den": 78125,
+   "display": "42.1648128",
+   "exact_text": "3294126/78125",
+   "note": "marathon"
+  },
+  {
+   "value": "1",
+   "from": "acre",
+   "to": "m2",
+   "num": 316160658,
+   "den": 78125,
+   "display": "4046.8564224",
+   "exact_text": "316160658/78125",
+   "note": "exactly 4046.8564224"
+  },
+  {
+   "value": "1",
+   "from": "gal",
+   "to": "L",
+   "num": 473176473,
+   "den": 125000000,
+   "display": "3.785411784",
+   "exact_text": "473176473/125000000",
+   "note": "exactly 3.785411784"
+  },
+  {
+   "value": "1",
+   "from": "cup",
+   "to": "mL",
+   "num": 473176473,
+   "den": 2000000,
+   "display": "236.5882365",
+   "exact_text": "473176473/2000000",
+   "note": "non-terminating US cup"
+  },
+  {
+   "value": "2",
+   "from": "tbsp",
+   "to": "tsp",
+   "num": 6,
+   "den": 1,
+   "display": "6",
+   "exact_text": "",
+   "note": "exactly 6"
+  },
+  {
+   "value": "1",
+   "from": "impgal",
+   "to": "gal",
+   "num": 568261250,
+   "den": 473176473,
+   "display": "1.2009499255",
+   "exact_text": "568261250/473176473",
+   "note": ""
+  },
+  {
+   "value": "150",
+   "from": "lb",
+   "to": "kg",
+   "num": 136077711,
+   "den": 2000000,
+   "display": "68.0388555",
+   "exact_text": "136077711/2000000",
+   "note": ""
+  },
+  {
+   "value": "1",
+   "from": "st",
+   "to": "lb",
+   "num": 14,
+   "den": 1,
+   "display": "14",
+   "exact_text": "",
+   "note": "exactly 14"
+  },
+  {
+   "value": "1",
+   "from": "kg",
+   "to": "oz",
+   "num": 1600000000,
+   "den": 45359237,
+   "display": "35.2739619496",
+   "exact_text": "1600000000/45359237",
+   "note": ""
+  },
+  {
+   "value": "98.6",
+   "from": "degF",
+   "to": "degC",
+   "num": 37,
+   "den": 1,
+   "display": "37",
+   "exact_text": "",
+   "note": "body temperature: exactly 37"
+  },
+  {
+   "value": "-40",
+   "from": "degC",
+   "to": "degF",
+   "num": -40,
+   "den": 1,
+   "display": "-40",
+   "exact_text": "",
+   "note": "where the scales meet"
+  },
+  {
+   "value": "0",
+   "from": "K",
+   "to": "degC",
+   "num": -5463,
+   "den": 20,
+   "display": "-273.15",
+   "exact_text": "-5463/20",
+   "note": "exactly -273.15"
+  },
+  {
+   "value": "100",
+   "from": "degC",
+   "to": "degR",
+   "num": 67167,
+   "den": 100,
+   "display": "671.67",
+   "exact_text": "67167/100",
+   "note": ""
+  },
+  {
+   "value": "32",
+   "from": "psi",
+   "to": "kPa",
+   "num": 8896443230521,
+   "den": 40322500000,
+   "display": "220.632233381",
+   "exact_text": "8896443230521/40322500000",
+   "note": "tyre pressure"
+  },
+  {
+   "value": "1",
+   "from": "atm",
+   "to": "torr",
+   "num": 760,
+   "den": 1,
+   "display": "760",
+   "exact_text": "",
+   "note": "exactly 760"
+  },
+  {
+   "value": "1",
+   "from": "atm",
+   "to": "psi",
+   "num": 18677382000000,
+   "den": 1270920461503,
+   "display": "14.6959487755",
+   "exact_text": "18677382000000/1270920461503",
+   "note": ""
+  },
+  {
+   "value": "1",
+   "from": "kWh",
+   "to": "BTU",
+   "num": 180000000000000,
+   "den": 52752792631,
+   "display": "3412.14163313",
+   "exact_text": "180000000000000/52752792631",
+   "note": ""
+  },
+  {
+   "value": "2000",
+   "from": "kcal",
+   "to": "kJ",
+   "num": 8368,
+   "den": 1,
+   "display": "8368",
+   "exact_text": "",
+   "note": ""
+  },
+  {
+   "value": "1",
+   "from": "hp",
+   "to": "kW",
+   "num": 37284993579113511,
+   "den": 50000000000000000,
+   "display": "0.745699871582",
+   "exact_text": "37284993579113511/50000000000000000",
+   "note": ""
+  },
+  {
+   "value": "1",
+   "from": "GiB",
+   "to": "GB",
+   "num": 2097152,
+   "den": 1953125,
+   "display": "1.073741824",
+   "exact_text": "2097152/1953125",
+   "note": "binary vs decimal prefix"
+  },
+  {
+   "value": "1",
+   "from": "B",
+   "to": "bit",
+   "num": 8,
+   "den": 1,
+   "display": "8",
+   "exact_text": "",
+   "note": "exactly 8"
+  },
+  {
+   "value": "1",
+   "from": "day",
+   "to": "s",
+   "num": 86400,
+   "den": 1,
+   "display": "86400",
+   "exact_text": "",
+   "note": "exactly 86400"
+  },
+  {
+   "value": "90",
+   "from": "min",
+   "to": "h",
+   "num": 3,
+   "den": 2,
+   "display": "1.5",
+   "exact_text": "3/2",
+   "note": "exactly 1.5"
+  },
+  {
+   "value": "1",
+   "from": "kn",
+   "to": "km/h",
+   "num": 463,
+   "den": 250,
+   "display": "1.852",
+   "exact_text": "463/250",
+   "note": "exactly 1.852"
+  },
+  {
+   "value": "1",
+   "from": "eV",
+   "to": "J",
+   "num": 801088317,
+   "den": 5000000000000000000000000000,
+   "display": "1.602176634e-19",
+   "exact_text": "801088317/5000000000000000000000000000",
+   "note": "SI 2019, exact"
+  },
+  {
+   "value": "0.5",
+   "from": "ft2",
+   "to": "in2",
+   "num": 72,
+   "den": 1,
+   "display": "72",
+   "exact_text": "",
+   "note": "exactly 72"
+  },
+  {
+   "value": "1",
+   "from": "m3",
+   "to": "ft3",
+   "num": 1953125000,
+   "den": 55306341,
+   "display": "35.3146667215",
+   "exact_text": "1953125000/55306341",
+   "note": ""
+  }
+ ],
+ "errors": [
+  {
+   "value": "1",
+   "from": "ft",
+   "to": "kg",
+   "error": "cannot convert length (ft) to mass (kg)"
+  },
+  {
+   "value": "1",
+   "from": "fts",
+   "to": "m",
+   "error": "unknown unit \"fts\""
+  },
+  {
+   "value": "1",
+   "from": "MM",
+   "to": "m",
+   "error": "unknown unit \"MM\"",
+   "note": "symbols are case-sensitive"
+  },
+  {
+   "value": "abc",
+   "from": "m",
+   "to": "ft",
+   "error": "is not a number"
+  }
+ ]
+}
