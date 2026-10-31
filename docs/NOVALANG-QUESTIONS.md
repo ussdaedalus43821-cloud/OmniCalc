@@ -21,6 +21,13 @@ in either repo. All NovaLang facts below cite files in the Nova_Lang repo.
 | CSV | No CSV support. `split()` doesn't handle quoted fields | `README.md` "Standard library"; verified |
 | Decimal | None built in. `decimal` isn't on the `python.import` allowlist (`datetime` is) | `README.md` "Security" |
 
+## Resolved by CLAUDE.md
+- Q4 (partial): money must use decimal arithmetic, never floats. Still open: implementation
+  (fixed-point ints in NovaLang vs. host `decimal`) and rounding rule.
+- Q6: CSV export is required on every result screen.
+- Q10 (partial): module layout is fixed by CLAUDE.md "Architecture"; v1 milestone order still open.
+- New: PDF export and local storage are required; both need host adapters or JSON-on-filesystem.
+
 ## Questions — please answer before any app code
 
 1. **Target platforms.** NovaLang runs only where CPython runs. It has no web/iOS/Android
