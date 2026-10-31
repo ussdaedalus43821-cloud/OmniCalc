@@ -1,0 +1,106 @@
+# src/finance/refinance.nova - should you refinance? Compare keeping the
+# current loan with replacing it.
+#
+# ---- Conventions ----
+# Amounts are MAGNITUDES, as in amortization.nova (positive money). Rates are
+# PER PERIOD {num, den}; periods are months for a monthly loan. All amounts
+# share one scale and currency.
+# CLOSING COSTS are all-in (points, appraisal, title, everything). They are
+#   paid out of pocket at period 0 and are NOT amortized into the new loan:
+#   the new loan's principal is the current principal.
+# The new payment is tvm.pmt on (current principal, new rate, new term),
+#   rounded half-up to a minor unit. Both loans run through
+#   amortization.schedule_table, so final-payment adjustments are included.
+# Month k's saving = current payment in month k - new payment in month k,
+#   each 0 once its loan is paid off.
+#
+# ---- Result ----
+#   new_payment        money
+#   monthly_savings    current_payment - new_payment (signed money)
+#   breaks_even        true if the cumulative saving ever reaches the closing costs
+#   break_even_month   the smallest month k >= 1 where it does (0 when
+#                      breaks_even is false - NovaLang has no null)
+#   lifetime_savings   current total paid - (new total paid + closing costs):
+#                      what the refinance saves over both loans' full lives.
+#                      THE HEADLINE: "should I refinance?" is a question about
+#                      total dollars over the loans' lives.
+#   savings_over_remaining_term
+#                      savings summed over the SHORTER schedule's months, minus
+#                      closing costs (signed money) - a sanity check, not the
+#                      answer: when the terms differ it ignores the longer
+#                      loan's extra months, and can even have the opposite
+#                      sign (30 -> 15 years: -63,140.28 here, +164,400.34
+#                      lifetime). Named in M6; it was total_savings.
+#   payoff_period_current, payoff_period_new, current_total_paid, new_total_paid
+# Throws when the new rate is not lower AND the new payment is not lower:
+# then nothing is saved and there is no break-even to report.
+
+import "../core/money.nova" as money
+import "../core/rates.nova" as rates
+import "./tvm.nova" as tvm
+import "./amortization.nova" as am
+
+def rate_at_least(a, b) {
+    return a.num * b.den >= b.num * a.den
+}
+
+def payment_in(table, month) {
+    if month <= len(table.rows) {
+        return table.rows[month - 1][1]
+    }
+    return 0
+}
+
+def as_money(template, minor) {
+    return {minor: minor, scale: template.scale, currency: template.currency}
+}
+
+export def compare(current_principal, current_rate, current_n, current_payment, new_rate, new_n, closing_costs) {
+    money.check_same_unit(current_principal, closing_costs)
+    if closing_costs.minor < 0 {
+        throw("refinance: closing costs must not be negative, got " + str(closing_costs.minor) + " minor units")
+    }
+    rates.check_rate(new_rate)
+    let zero = as_money(current_principal, 0)
+    let current = am.schedule_table(current_principal, current_rate, current_n, current_payment, zero, [])
+    let new_payment = money.negate(tvm.pmt(current_principal, zero, new_n, new_rate))
+    let monthly_savings = money.subtract(current_payment, new_payment)
+    if rate_at_least(new_rate, current_rate) and monthly_savings.minor <= 0 {
+        throw("refinance: the new rate is not lower and the new payment (" + str(new_payment.minor) + ") is not lower than the current one (" + str(current_payment.minor) + "), so the refinance saves nothing and never breaks even")
+    }
+    let replacement = am.schedule_table(current_principal, new_rate, new_n, new_payment, zero, [])
+
+    let horizon = len(current.rows)
+    if len(replacement.rows) > horizon {
+        horizon = len(replacement.rows)
+    }
+    let shorter = len(current.rows)
+    if len(replacement.rows) < shorter {
+        shorter = len(replacement.rows)
+    }
+    let scan = {cumulative: 0, month: 0, shorter_sum: 0}
+    for k = 1 to horizon {
+        let saving = payment_in(current, k) - payment_in(replacement, k)
+        scan["cumulative"] = scan.cumulative + saving
+        if k <= shorter {
+            scan["shorter_sum"] = scan.shorter_sum + saving
+        }
+        if scan.month == 0 and scan.cumulative >= closing_costs.minor {
+            scan["month"] = k
+        }
+    }
+    return {
+        new_payment: new_payment,
+        monthly_savings: monthly_savings,
+        breaks_even: scan.month > 0,
+        break_even_month: scan.month,
+        savings_over_remaining_term: as_money(current_principal, scan.shorter_sum - closing_costs.minor),
+        lifetime_savings: as_money(current_principal, current.total_paid - replacement.total_paid - closing_costs.minor),
+        payoff_period_current: current.payoff_period,
+        payoff_period_new: replacement.payoff_period,
+        current_total_paid: as_money(current_principal, current.total_paid),
+        new_total_paid: as_money(current_principal, replacement.total_paid),
+        current_total_interest: as_money(current_principal, current.total_interest),
+        new_total_interest: as_money(current_principal, replacement.total_interest)
+    }
+}

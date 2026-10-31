@@ -1,0 +1,3 @@
+[submodule "vendor/Nova_Lang"]
+	path = vendor/Nova_Lang
+	url = https://github.com/ussdaedalus43821-cloud/Nova_Lang

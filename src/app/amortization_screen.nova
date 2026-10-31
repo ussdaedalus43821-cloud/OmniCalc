@@ -1,0 +1,70 @@
+# src/app/amortization_screen.nova - everything the amortization screen
+# computes, behind one call for the Python host (src/host/app.py).
+#
+# calculate() takes the four input boxes AS TYPED (strings) and returns only
+# integers, scales and strings. The host's whole job is to format
+# integer + scale as text and draw it (CLAUDE.md "Bridge contract").
+#
+# Assumptions, also returned for the screen to show:
+#   monthly payments at the end of each month; the monthly rate is the annual
+#   rate / 12 (rates.per_period); interest rounds half-up to the cent each
+#   month; the final payment is adjusted to clear the balance; the
+#   "IRR-implied annual rate" is the schedule's monthly IRR x 12.
+
+import "./parse_helpers.nova" as inputs
+import "../core/money.nova" as money
+import "../core/rates.nova" as rates
+import "../finance/tvm.nova" as tvm
+import "../finance/amortization.nova" as am
+import "../finance/cashflow.nova" as cf
+
+let CURRENCY = inputs.CURRENCY
+let SCALE = inputs.SCALE
+# The IRR-implied rate is shown in percent with 4 decimals.
+let RATE_DISPLAY_SCALE = 4
+let MONTHS_PER_YEAR = inputs.MONTHS_PER_YEAR
+let MAX_MONTHS = 1200
+
+let ASSUMPTIONS = [
+    "Payments are monthly, at the end of each month.",
+    "Monthly rate = annual rate / 12, kept exact (never pre-rounded).",
+    "Payment = the TVM closed form, rounded half-up to the cent.",
+    "Interest each month = balance x monthly rate, rounded half-up to the cent.",
+    "The final payment is adjusted to clear the balance; the adjustment column shows by how much.",
+    "IRR-implied annual rate = the schedule's monthly IRR x 12, from the actual rounded payments."
+]
+
+export def calculate(principal_text, rate_text, months_text, extra_text) {
+    let principal = inputs.amount(principal_text, "principal")
+    let monthly = inputs.monthly_rate(rate_text, "annual rate", false)
+    let months = inputs.count(months_text, "number of months", 1, MAX_MONTHS)
+    let extra_typed = extra_text
+    if trim(extra_text) == "" {
+        extra_typed = "0"
+    }
+    let extra = inputs.amount(extra_typed, "extra principal per month")
+
+    let payment = money.negate(tvm.pmt(principal, money.make(0, SCALE, CURRENCY), months, monthly))
+    let table = am.schedule_table(principal, monthly, months, payment, extra, [])
+    let rate = cf.table_irr(table, monthly)
+    # percent with RATE_DISPLAY_SCALE decimals: rate.num / (rate.den * MICRO) * 12 * 100 * 10^scale
+    let implied = money.round_half_up(rate.num * MONTHS_PER_YEAR * 100 * pow(10, RATE_DISPLAY_SCALE), rate.den * rates.MICRO)
+
+    let rows = []
+    for r in table.rows {
+        append(rows, [r[0], r[1], r[2], r[3], r[4], r[6], r[7]])
+    }
+    return {
+        currency: CURRENCY,
+        scale: SCALE,
+        payment: payment.minor,
+        total_paid: table.total_paid,
+        total_interest: table.total_interest,
+        payoff_period: table.payoff_period,
+        implied_rate: {value: implied, scale: RATE_DISPLAY_SCALE},
+        columns: ["period", "payment", "interest", "principal", "balance", "extra", "adjustment"],
+        column_kinds: ["count", "money", "money", "money", "money", "money", "money"],
+        rows: rows,
+        assumptions: ASSUMPTIONS
+    }
+}

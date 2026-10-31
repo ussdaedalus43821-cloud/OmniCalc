@@ -1,0 +1,35 @@
+# module: numbers
+# expect: 15
+#
+# src/core/numbers.nova, including the NaN/Inf guard. NaN and inf are real
+# inputs: num() of a long decimal string returns inf, and json.loads("NaN")
+# returns nan. Unguarded, floor() on either crashes the interpreter.
+
+import "../../tools/check.nova" as t
+import "../../src/core/numbers.nova" as numbers
+
+let nan = json.loads("NaN")
+let inf = json.loads("1e999")
+let minus_inf = 0 - inf
+
+t.check("an int is finite", numbers.is_finite(7), true)
+t.check("a fraction is finite", numbers.is_finite(1.5), true)
+t.check("NaN is not finite", numbers.is_finite(nan), false)
+t.check("inf is not finite", numbers.is_finite(inf), false)
+t.check("-inf is not finite", numbers.is_finite(minus_inf), false)
+t.check("a string is not a number", numbers.is_finite("1"), false)
+t.check("a boolean is not a number", numbers.is_finite(true), false)
+t.check("2.0 is whole", numbers.is_whole(2.0), true)
+t.check("2.5 is not whole", numbers.is_whole(2.5), false)
+t.check("NaN is not whole (and does not crash floor)", numbers.is_whole(nan), false)
+t.check("require_whole returns the int", numbers.require_whole(2.0, "x", "test"), 2)
+def whole_nan() { numbers.require_whole(nan, "x", "test") }
+t.check_throws("require_whole rejects NaN", whole_nan, "test: x must be a whole number")
+def whole_inf() { numbers.require_whole(inf, "x", "test") }
+t.check_throws("require_whole rejects inf", whole_inf, "must be a whole number")
+def whole_minus_inf() { numbers.require_whole(minus_inf, "x", "test") }
+t.check_throws("require_whole rejects -inf", whole_minus_inf, "must be a whole number")
+def whole_from_long_text() { numbers.require_whole(num("1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0"), "x", "test") }
+t.check_throws("require_whole rejects num() of a too-long decimal string", whole_from_long_text, "must be a whole number")
+
+t.finish()

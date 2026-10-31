@@ -1,0 +1,119 @@
+# src/app/debt_payoff_screen.nova - the debt payoff screen's calculation,
+# behind one call for the Python host. Same contract as the other facades:
+# input boxes as typed (strings) in; integers, scales and strings out.
+#
+# debt_rows is the debt list as typed: [[name, balance, APR %, minimum], ...]
+# (rows left completely blank are skipped). Both strategies are always
+# computed so the screen can compare them; `strategy` picks the one shown in
+# the per-debt table and CSV and marked in the summary.
+
+import "./parse_helpers.nova" as inputs
+import "../core/money.nova" as money
+import "../core/rates.nova" as rates
+import "../finance/debt_payoff.nova" as dp
+
+let RATE_DISPLAY_SCALE = 4
+
+let ASSUMPTIONS = [
+    "Each month every debt accrues interest (APR / 12, rounded half-up to the cent), then gets its minimum payment.",
+    "Everything left in the budget goes to the target debt: smallest balance first (snowball) or highest rate first (avalanche).",
+    "The whole budget is paid every month, so a paid-off debt's minimum rolls into the next target.",
+    "The order is fixed at the start; ties keep the order of the list."
+]
+
+def blank(row) {
+    for cell in row {
+        if trim(cell) != "" {
+            return false
+        }
+    }
+    return true
+}
+
+def parse_debts(debt_rows) {
+    if type(debt_rows) != "list" {
+        throw("parse: the debt list must be a list of rows")
+    }
+    let debts = []
+    let shown = []
+    for i = 0 to len(debt_rows) - 1 {
+        let row = debt_rows[i]
+        if type(row) != "list" or len(row) != 4 {
+            throw("parse: each debt row needs a name, balance, APR and minimum payment")
+        }
+        if not blank(row) {
+            let label = trim(row[0])
+            if label == "" {
+                throw("parse: debt row " + str(i + 1) + " needs a name")
+            }
+            let apr = inputs.annual_rate_micro(row[2], label + " APR", false)
+            let debt = {
+                name: label,
+                balance: inputs.amount(row[1], label + " balance"),
+                rate: rates.per_period(rates.annual(apr), inputs.MONTHS_PER_YEAR),
+                minimum_payment: inputs.amount(row[3], label + " minimum payment")
+            }
+            append(debts, debt)
+            append(shown, {apr: apr, debt: debt})
+        }
+    }
+    if len(debts) == 0 {
+        throw("parse: enter at least one debt")
+    }
+    return {debts: debts, shown: shown}
+}
+
+def summary_phrase(plan, selected) {
+    let marker = ""
+    if plan.strategy == selected {
+        marker = "> "
+    }
+    return {before: marker + str(plan.payoff_months) + " months, ", amount: plan.total_interest.minor, after: " interest"}
+}
+
+def difference_phrase(snowball, avalanche) {
+    let gap = snowball.total_interest.minor - avalanche.total_interest.minor
+    if gap > 0 {
+        return {before: "avalanche saves ", amount: gap, after: " in interest"}
+    }
+    if gap < 0 {
+        return {before: "snowball saves ", amount: 0 - gap, after: " in interest"}
+    }
+    return {before: "same interest either way (", amount: 0, after: " difference)"}
+}
+
+export def calculate(debt_rows, budget_text, strategy) {
+    let parsed = parse_debts(debt_rows)
+    let budget = inputs.amount(budget_text, "monthly budget")
+    if strategy != "snowball" and strategy != "avalanche" {
+        throw("parse: strategy must be snowball or avalanche")
+    }
+    let snowball = dp.payoff_plan(parsed.debts, budget, "snowball")
+    let avalanche = dp.payoff_plan(parsed.debts, budget, "avalanche")
+    let chosen = snowball
+    if strategy == "avalanche" {
+        chosen = avalanche
+    }
+    let rows = []
+    for position = 1 to len(chosen.order_index) {
+        let i = chosen.order_index[position - 1]
+        let entry = parsed.shown[i]
+        let result = chosen.per_debt[i]
+        append(rows, [position, entry.debt.name, entry.debt.balance.minor, {value: entry.apr, scale: RATE_DISPLAY_SCALE}, entry.debt.minimum_payment.minor, result.paid_off_month, result.interest_paid.minor])
+    }
+    return {
+        currency: inputs.CURRENCY,
+        scale: inputs.SCALE,
+        strategy: strategy,
+        payoff_months: chosen.payoff_months,
+        total_interest: chosen.total_interest.minor,
+        total_paid: chosen.total_paid.minor,
+        snowball: summary_phrase(snowball, strategy),
+        avalanche: summary_phrase(avalanche, strategy),
+        difference: difference_phrase(snowball, avalanche),
+        columns: ["order", "debt", "balance", "apr", "minimum", "paid_off_month", "interest_paid"],
+        column_kinds: ["count", "text", "money", "percent", "money", "count", "money"],
+        rows: rows,
+        assumptions: ASSUMPTIONS
+    }
+}

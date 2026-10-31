@@ -1,0 +1,137 @@
+# module: tvm
+# expect: 51
+#
+# Reference values come from tests/finance/gen_tvm_vectors.py: an independent
+# Python decimal (80-digit) implementation of the textbook closed forms, with
+# ROUND_HALF_UP. Re-run it to regenerate; the labels below match its output.
+#
+# Why some round-trips are "re-solve to the same rounded value" rather than
+# "back to the original input": a payment rounded to the cent is not the
+# exact payment, so rebuilding pv from -1,264.14 gives 200,000.63 (not
+# 200,000.00) and the leftover fv is +4.37. That is the rounding, not a
+# solver error. What must hold is that solving again from the rebuilt value
+# gives back the same rounded payment.
+
+import "../../tools/check.nova" as t
+import "../../src/core/money.nova" as money
+import "../../src/core/rates.nova" as rates
+import "../../src/finance/tvm.nova" as tvm
+
+def usd(minor) {
+    return money.make(minor, 2, "USD")
+}
+
+def micro_usd(minor) {
+    return money.make(minor, 6, "USD")
+}
+
+# |a - b| <= 10^-digits, both rates per period, compared exactly in integers.
+def rates_within(a, b, digits) {
+    let gap = abs(a.num * b.den - b.num * a.den)
+    return gap * pow(10, digits) <= a.den * b.den * rates.MICRO
+}
+
+let ZERO = usd(0)
+let monthly_65 = rates.per_period(rates.annual(65000), 12)
+let loan = usd(20000000)
+
+# ---- 1. canonical mortgage: 200,000.00 at 6.5%/12, 360 periods ----
+let payment = tvm.pmt(loan, ZERO, 360, monthly_65)
+t.check("mortgage pmt (cents)", payment, usd(-126414))
+let leftover = tvm.fv(loan, payment, 360, monthly_65)
+t.check("mortgage fv with rounded pmt", leftover, usd(437))
+let rebuilt_pv = tvm.pv(ZERO, payment, 360, monthly_65)
+t.check("mortgage pv with rounded pmt", rebuilt_pv, usd(20000063))
+t.check("re-solving pmt from the rebuilt pv gives the same pmt", tvm.pmt(rebuilt_pv, ZERO, 360, monthly_65), payment)
+t.check("re-solving pmt with the leftover fv gives the same pmt", tvm.pmt(loan, leftover, 360, monthly_65), payment)
+let periods = tvm.n(loan, ZERO, payment, monthly_65)
+t.check("mortgage n: whole periods", periods.periods, 360)
+t.check_true("mortgage n: exact matches the reference", abs(periods.exact - 359.996531611499) < 0.000001)
+
+let solved = tvm.rate(loan, ZERO, payment, 360)
+t.check_true("mortgage rate within 1e-12 of the reference", rates_within(solved, {num: 5416691711696923082426449437, den: 1000000000000000000000000}, 12))
+t.check("the solved rate reproduces the rounded pmt", tvm.pmt(loan, ZERO, 360, solved), payment)
+t.check_true("cent rounding moves the rate less than 1e-7 from 6.5%/12", rates_within(solved, monthly_65, 7))
+t.check("...but more than 1e-9 (the 2.5e-8 that rounding to the cent costs)", rates_within(solved, monthly_65, 9), false)
+
+# ---- 2. the same mortgage at scale 6: the exact answer is 6.5%/12 ----
+let fine_payment = tvm.pmt(micro_usd(200000000000), micro_usd(0), 360, monthly_65)
+t.check("scale-6 mortgage pmt", fine_payment, micro_usd(-1264136047))
+let fine_rate = tvm.rate(micro_usd(200000000000), micro_usd(0), fine_payment, 360)
+t.check_true("solve rate: back to 6.5%/12 within 1e-9 per period", rates_within(fine_rate, monthly_65, 9))
+t.check_true("solve rate: within 1e-12 of the reference", rates_within(fine_rate, {num: 5416666666755825802483211894, den: 1000000000000000000000000}, 12))
+t.check("scale-6 solved rate reproduces the pmt", tvm.pmt(micro_usd(200000000000), micro_usd(0), 360, fine_rate), fine_payment)
+
+# ---- 3. zero rate: no division by r ----
+let zero_rate = rates.annual(0)
+t.check("zero-rate pmt", tvm.pmt(usd(120000), ZERO, 12, zero_rate), usd(-10000))
+t.check("zero-rate fv", tvm.fv(usd(120000), usd(-10000), 12, zero_rate), ZERO)
+t.check("zero-rate pv", tvm.pv(ZERO, usd(-10000), 12, zero_rate), usd(120000))
+t.check("zero-rate n", tvm.n(usd(120000), ZERO, usd(-10000), zero_rate), {exact: 12, periods: 12})
+t.check("zero-rate rate", tvm.rate(usd(120000), ZERO, usd(-10000), 12), {num: 0, den: 1})
+t.check("zero-rate pmt rounds half-up once", tvm.pmt(usd(100000), ZERO, 3, zero_rate), usd(-33333))
+
+# ---- 4. negative rate: 10,000.00 deposited at -1%/12 for 12 periods ----
+let monthly_neg = rates.per_period(rates.annual(-10000), 12)
+let shrunk = tvm.fv(usd(-1000000), ZERO, 12, monthly_neg)
+t.check("negative-rate fv", shrunk, usd(990046))
+t.check("negative-rate pv from that fv", tvm.pv(shrunk, ZERO, 12, monthly_neg), usd(-1000000))
+let neg_periods = tvm.n(usd(-1000000), shrunk, ZERO, monthly_neg)
+t.check("negative-rate n: whole periods", neg_periods.periods, 12)
+t.check_true("negative-rate n: exact matches the reference", abs(neg_periods.exact - 11.9996441126358) < 0.000001)
+let neg_rate = tvm.rate(usd(-1000000), shrunk, ZERO, 12)
+t.check_true("negative-rate rate within 1e-12 of the reference", rates_within(neg_rate, {num: -833308629233267417708055039, den: 1000000000000000000000000}, 12))
+t.check_true("negative-rate rate is negative", neg_rate.num < 0)
+
+# ---- 5. savings: 100.00 deposited monthly at 5%/12 for 120 periods ----
+let monthly_5 = rates.per_period(rates.annual(50000), 12)
+let saved = tvm.fv(ZERO, usd(-10000), 120, monthly_5)
+t.check("savings fv", saved, usd(1552823))
+let save_periods = tvm.n(ZERO, saved, usd(-10000), monthly_5)
+t.check("savings n: a rounding overshoot is not an extra period", save_periods.periods, 120)
+t.check_true("savings n: exact matches the reference", abs(save_periods.exact - 120.000012505771) < 0.000001)
+t.check_true("savings rate within 1e-12 of the reference", rates_within(tvm.rate(ZERO, saved, usd(-10000), 120), {num: 4166668728428192671110759649, den: 1000000000000000000000000}, 12))
+
+# ---- 6. edges and errors ----
+t.check("n = 0: fv is just -pv", tvm.fv(loan, ZERO, 0, monthly_65), usd(-20000000))
+def pmt_no_periods() { tvm.pmt(loan, ZERO, 0, monthly_65) }
+t.check_throws("pmt needs at least one period", pmt_no_periods, "at least 1")
+def mixed_currency() { tvm.fv(loan, money.make(-126414, 2, "EUR"), 360, monthly_65) }
+t.check_throws("mixed currencies are rejected", mixed_currency, "same currency and scale")
+def no_rate() { tvm.rate(usd(10000), usd(10000), usd(10000), 12) }
+t.check_throws("all-positive cash flows have no rate", no_rate, "no rate")
+def never_paid() { tvm.n(loan, ZERO, usd(-100), monthly_65) }
+t.check_throws("a payment below the interest never pays off", never_paid, "no number of periods")
+def interest_only() { tvm.n(usd(1200000), ZERO, usd(-12000), rates.annual(10000)) }
+t.check_throws("an interest-only payment never pays off", interest_only, "exactly covers the interest")
+def minus_100() { tvm.fv(loan, ZERO, 12, rates.annual(-1000000)) }
+t.check_throws("a rate of -100% per period is rejected", minus_100, "above -100%")
+def fractional_n() { tvm.fv(loan, ZERO, 1.5, monthly_65) }
+t.check_throws("fractional n is rejected", fractional_n, "whole number")
+def no_payment_zero_rate() { tvm.n(loan, ZERO, ZERO, zero_rate) }
+t.check_throws("zero rate and zero payment has no n", no_payment_zero_rate, "zero rate with no payment")
+
+# ---- 7. added in M2 review: the periods rule and multiple roots ----
+# whole_periods: f = floor(exact); report f if exact - f < 1e-4, else f + 1.
+t.check("periods: an exact integer stays", tvm.whole_periods(120), 120)
+t.check("periods: 120.00005 is inside the slack", tvm.whole_periods(120.00005), 120)
+t.check("periods: 120.0002 is outside the slack", tvm.whole_periods(120.0002), 121)
+t.check("periods: 119.9999 rounds up", tvm.whole_periods(119.9999), 120)
+t.check("periods: never below 1", tvm.whole_periods(0.00001), 1)
+def periods_nan() { tvm.whole_periods(json.loads("NaN")) }
+t.check_throws("periods: NaN is rejected", periods_nan, "positive finite")
+
+# -100.00 now, +230.00 after one period, -132.00 after two: the residual
+# -100g^2 + 230g - 132 has roots g = 1.1 and g = 1.2, i.e. 10% and 20%.
+# rate() must return the smaller positive one.
+let two_root = tvm.rate(usd(-10000), usd(-36200), usd(23000), 2)
+t.check_true("two roots: returns 10% (within 1e-9)", rates_within(two_root, rates.annual(100000), 9))
+t.check("two roots: 20% is also a root", tvm.fv(usd(-10000), usd(23000), 2, rates.annual(200000)), usd(-36200))
+t.check("two roots: 10% reproduces the cash flows", tvm.fv(usd(-10000), usd(23000), 2, rates.annual(100000)), usd(-36200))
+
+# ---- added in M7 prep: pmt_exact, the unrounded payment ----
+let exact_payment = tvm.pmt_exact(loan, ZERO, 360, monthly_65)
+t.check("pmt_exact rounds half-up to pmt", money.round_half_up(exact_payment.num, exact_payment.den), -126414)
+t.check("pmt_exact at a zero rate", tvm.pmt_exact(usd(100000), ZERO, 3, zero_rate), {num: -100000, den: 3, scale: 2, currency: "USD"})
+
+t.finish()

@@ -1,0 +1,204 @@
+# src/finance/amortization.nova - loan amortization schedules.
+#
+# ---- Conventions ----
+# A schedule returns DISPLAY amounts, not cash flows. Use
+#   cashflow.from_schedule(schedule) (src/finance/cashflow.nova) for any
+#   cash-flow analysis (NPV, IRR): it is the one place the signs flip.
+# Amounts here are MAGNITUDES, not TVM-signed cash flows: principal,
+#   payment, extra and lump sums are all positive money, and every row
+#   reports positive amounts. To use a payment from tvm.pmt() (which is
+#   negative, money paid out), pass money.negate(tvm.pmt(...)).
+# rate is PER PERIOD, a {num, den} from src/core/rates.nova - the same as
+#   tvm.nova. Converting an annual rate is the caller's job.
+# Every money value shares one scale and currency (src/core/money.nova).
+#
+# ---- Each period ----
+#   interest  = balance * rate, rounded half-up once: the cash-flow
+#               boundary (money.round_half_up_whole - the unchecked form,
+#               since every operand is an int validated before the loop)
+#   scheduled = regular payment + extra (+ any lump sum for this period)
+# If scheduled >= balance + interest, or this is period n, the period is the
+# FINAL row: it pays exactly balance + interest, and
+#   adjustment = what was paid - scheduled
+# records the difference visibly in that row. It is negative when the final
+# payment was adjusted down (the rounded payment overshoots, or extra
+# payments paid the loan off early) and positive when adjusted up (the
+# rounded payment fell short). Every row satisfies
+#   payment == regular + extra + adjustment == interest + principal.
+#
+# ---- Rejected inputs (each throws) ----
+#   principal <= 0, payment <= 0, extra < 0, n < 1, mixed currencies; a
+#   lump sum that is not positive or whose period is outside 1..n; and a
+#   payment (+ extra) that does not exceed the first period's interest -
+#   negative amortization: the balance would never fall.
+#
+# The loop works on plain ints and builds money values only for the output,
+# to stay inside the UI-path budget (CLAUDE.md "Performance rule").
+
+import "../core/numbers.nova" as numbers
+import "../core/money.nova" as money
+import "../core/rates.nova" as rates
+
+let MICRO = rates.MICRO
+let BIWEEKLY_PERIODS_PER_YEAR = 26
+
+def require_periods(n) {
+    let whole = numbers.require_whole(n, "n", "amortization")
+    if whole < 1 {
+        throw("amortization: n must be at least 1, got " + str(n))
+    }
+    return whole
+}
+
+def require_amount(amount, unit, what, allow_zero) {
+    money.check_same_unit(unit, amount)
+    if amount.minor < 0 or (amount.minor == 0 and not allow_zero) {
+        if allow_zero {
+            throw("amortization: " + what + " must not be negative, got " + str(amount.minor) + " minor units")
+        }
+        throw("amortization: " + what + " must be positive, got " + str(amount.minor) + " minor units")
+    }
+    return amount.minor
+}
+
+# lump_sums: [{period, amount}, ...] -> a list indexed by period (0..n).
+def lumps_by_period(lump_sums, unit, n) {
+    let table = []
+    for i = 0 to n {
+        append(table, 0)
+    }
+    for lump in lump_sums {
+        if type(lump) != "dict" or not ("period" in lump) or not ("amount" in lump) {
+            throw("amortization: each lump sum must be {period, amount}, got " + str(lump))
+        }
+        let period = numbers.require_whole(lump.period, "lump sum period", "amortization")
+        if period < 1 or period > n {
+            throw("amortization: lump sum period must be 1-" + str(n) + ", got " + str(lump.period))
+        }
+        table[period] = table[period] + require_amount(lump.amount, unit, "lump sum amount", false)
+    }
+    return table
+}
+
+# Validates every input once and returns the plain ints the core needs.
+def checked_inputs(principal, rate, n, payment, extra, lump_sums) {
+    rates.check_rate(rate)
+    let periods = require_periods(n)
+    let balance = require_amount(principal, principal, "principal", false)
+    let regular = require_amount(payment, principal, "payment", false)
+    let extra_minor = require_amount(extra, principal, "extra principal", true)
+    let lumps = lumps_by_period(lump_sums, principal, periods)
+    let first_interest = money.round_half_up(balance * rate.num, rate.den * MICRO)
+    if regular + extra_minor <= first_interest {
+        throw("amortization: a payment of " + str(regular + extra_minor) + " does not exceed the first period's interest of " + str(first_interest) + " minor units, so the balance never falls (negative amortization)")
+    }
+    return {balance: balance, regular: regular, extra: extra_minor, lumps: lumps, periods: periods, rate: rate, scale: principal.scale, currency: principal.currency}
+}
+
+# The unchecked core (CLAUDE.md "Hot-loop primitives"): plain ints in, rows
+# of plain ints out, [period, payment, interest, principal, balance,
+# regular, extra, adjustment]; the last row is the final one. `inputs` MUST
+# come from checked_inputs().
+def table_whole(inputs) {
+    let d = inputs.rate.den * MICRO
+    let num_rate = inputs.rate.num
+    let balance = inputs.balance
+    let regular = inputs.regular
+    let periods = inputs.periods
+    let rows = []
+    let totals = {paid: 0, interest: 0}
+    for period = 1 to periods {
+        let interest = money.round_half_up_whole(balance * num_rate, d)
+        let due = balance + interest
+        let extra_here = inputs.extra + inputs.lumps[period]
+        let scheduled = regular + extra_here
+        let final = scheduled >= due or period == periods
+        let paid = scheduled
+        if final {
+            paid = due
+        }
+        let principal_part = paid - interest
+        balance = balance - principal_part
+        totals["paid"] = totals.paid + paid
+        totals["interest"] = totals.interest + interest
+        append(rows, [period, paid, interest, principal_part, balance, regular, extra_here, paid - scheduled])
+        if final {
+            break
+        }
+    }
+    return {
+        scale: inputs.scale,
+        currency: inputs.currency,
+        principal: inputs.balance,
+        columns: ["period", "payment", "interest", "principal", "balance", "regular", "extra", "adjustment"],
+        rows: rows,
+        total_paid: totals.paid,
+        total_interest: totals.interest,
+        payoff_period: len(rows)
+    }
+}
+
+def unit(table, minor) {
+    return {minor: minor, scale: table.scale, currency: table.currency}
+}
+
+# The checked path: the core's int rows wrapped as money rows.
+def run(principal, rate, n, payment, extra, lump_sums) {
+    let table = table_whole(checked_inputs(principal, rate, n, payment, extra, lump_sums))
+    let rows = []
+    let last = len(table.rows)
+    for r in table.rows {
+        let kind = "regular"
+        if r[0] == last {
+            kind = "final"
+        }
+        append(rows, {
+            period: r[0], payment: unit(table, r[1]), interest: unit(table, r[2]), principal: unit(table, r[3]),
+            balance: unit(table, r[4]), regular: unit(table, r[5]), extra: unit(table, r[6]), adjustment: unit(table, r[7]),
+            kind: kind
+        })
+    }
+    return {
+        rows: rows,
+        totals: {total_paid: unit(table, table.total_paid), total_interest: unit(table, table.total_interest), payoff_period: table.payoff_period}
+    }
+}
+
+# The same schedule as schedule_with_extra(), as a compact table of plain
+# ints for screen facades and cash-flow code: {scale, currency, principal,
+# columns, rows, total_paid, total_interest, payoff_period}, where each row
+# is [period, payment, interest, principal, balance, regular, extra,
+# adjustment] in minor units and the last row is the final one. Inputs are
+# checked exactly as schedule_with_extra() checks them.
+export def schedule_table(principal, rate, n, payment, extra_principal_per_period, lump_sums) {
+    return table_whole(checked_inputs(principal, rate, n, payment, extra_principal_per_period, lump_sums))
+}
+
+# A fixed-payment schedule over at most n periods. Returns {rows, totals}:
+# rows are {period, payment, interest, principal, balance, regular, extra,
+# adjustment, kind} (money, except period and kind: "regular" | "final");
+# totals are {total_paid, total_interest, payoff_period}.
+export def schedule(principal, rate, n, payment) {
+    return run(principal, rate, n, payment, money.make(0, principal.scale, principal.currency), [])
+}
+
+# schedule() plus extra principal every period and lump sums
+# [{period, amount}, ...]; several lump sums in one period add up. A lump
+# sum scheduled after the loan is already paid off never happens.
+export def schedule_with_extra(principal, rate, n, payment, extra_principal_per_period, lump_sums) {
+    return run(principal, rate, n, payment, extra_principal_per_period, lump_sums)
+}
+
+# Biweekly: 26 periods a year, each paying half the monthly `payment`
+# (rounded half-up to a minor unit). `rate` is the rate PER BIWEEKLY PERIOD,
+# exactly as supplied - typically rates.per_period(rates.annual(m), 26); it
+# is not re-derived from a monthly rate. The term is n_months, which allows
+# at most ceil(n_months * 26 / 12) biweekly periods; in practice the extra
+# half-payment a year pays the loan off well before that.
+export def schedule_biweekly(principal, rate, n_months, payment) {
+    let months = require_periods(n_months)
+    let periods = (months * BIWEEKLY_PERIODS_PER_YEAR + 11) // 12
+    require_amount(payment, principal, "payment", false)
+    let half = money.make(money.round_half_up(payment.minor, 2), payment.scale, payment.currency)
+    return run(principal, rate, periods, half, money.make(0, principal.scale, principal.currency), [])
+}

@@ -1,0 +1,28 @@
+# module: debt_payoff_screen
+# expect: 11
+#
+# The 3-debt case from tests/finance/debt_payoff_test.nova, typed in.
+
+import "../../tools/check.nova" as t
+import "../../src/app/debt_payoff_screen.nova" as screen
+
+let typed = [["Medical", "1,200", "0", "50"], ["Card", "6,000.00", "24.99", "150"], ["Car", "9000", "7", "250"], ["", "", "", ""]]
+let avalanche = screen.calculate(typed, "700", "avalanche")
+t.check("avalanche: totals of the selected strategy", [avalanche.payoff_months, avalanche.total_interest, avalanche.total_paid], [27, 217869, 1837869])
+t.check("avalanche: per-debt rows in payoff order", avalanche.rows, [[1, "Card", 600000, {value: 249900, scale: 4}, 15000, 19, 126870], [2, "Car", 900000, {value: 70000, scale: 4}, 25000, 27, 90999], [3, "Medical", 120000, {value: 0, scale: 4}, 5000, 24, 0]])
+t.check("both strategies shown, the selected one marked", [avalanche.avalanche.before, avalanche.snowball.before], ["> 27 months, ", "27 months, "])
+t.check("the interest difference is phrased", avalanche.difference, {before: "avalanche saves ", amount: 30695, after: " in interest"})
+let snowball = screen.calculate(typed, "700", "snowball")
+t.check("snowball: a different order", [snowball.rows[0][1], snowball.rows[1][1], snowball.rows[2][1]], ["Medical", "Card", "Car"])
+t.check("snowball: marked instead", [snowball.snowball.before, snowball.avalanche.before], ["> 27 months, ", "27 months, "])
+t.check("column kinds line up", len(snowball.column_kinds), len(snowball.columns))
+def short_budget() { screen.calculate(typed, "449.99", "snowball") }
+t.check_throws("a budget below the minimums", short_budget, "below the sum of the minimum payments")
+def nameless() { screen.calculate([["", "100", "5", "10"]], "100", "snowball") }
+t.check_throws("a row without a name", nameless, "debt row 1 needs a name")
+def no_debts() { screen.calculate([["", "", "", ""]], "100", "snowball") }
+t.check_throws("only blank rows", no_debts, "enter at least one debt")
+def bad_apr() { screen.calculate([["Card", "100", "5%", "10"]], "100", "snowball") }
+t.check_throws("a bad APR names the debt", bad_apr, "Card APR \"5%\" is not a number")
+
+t.finish()

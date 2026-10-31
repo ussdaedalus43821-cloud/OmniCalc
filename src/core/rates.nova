@@ -1,0 +1,61 @@
+# src/core/rates.nova - interest rates as exact integer ratios.
+#
+# A rate is {num, den}: its value in micro-units (1e-6 of a fraction) is
+# num / den, so as a plain fraction it is num / (den * MICRO). An annual rate
+# of 6.5% is annual(65000) = {num: 65000, den: 1}. Dividing into periods
+# multiplies den instead of dividing num, so the remainder is carried exactly
+# and nothing is ever rounded here - money.multiply_rate() rounds once, at
+# the cash-flow boundary.
+#
+# NovaLang's `/` returns a float for inexact integer division
+# (Nova_Lang/novalang.py:3258-3265), so this module uses only + - * // %.
+
+import "./numbers.nova" as numbers
+
+export let MICRO = 1000000
+
+def require_whole(value, what) {
+    return numbers.require_whole(value, what, "rates")
+}
+
+def require_rate(rate) {
+    if type(rate) != "dict" or not ("num" in rate) or not ("den" in rate) {
+        throw("rates: expected a rate {num, den}, got " + str(rate))
+    }
+    require_whole(rate.num, "rate num")
+    if require_whole(rate.den, "rate den") < 1 {
+        throw("rates: rate den must be at least 1, got " + str(rate.den))
+    }
+    return rate
+}
+
+# Negative rates are allowed: they exist in practice and the arithmetic
+# needs no special case.
+export def annual(micro) {
+    return {num: require_whole(micro, "annual micro-units"), den: 1}
+}
+
+export def per_period(rate, periods) {
+    require_rate(rate)
+    let n = require_whole(periods, "periods")
+    if n < 1 {
+        throw("rates: periods must be at least 1, got " + str(periods))
+    }
+    return {num: rate.num, den: rate.den * n}
+}
+
+# Whole micro-units and the carried remainder, using floor division:
+# micro_whole(r) * r.den + micro_remainder(r) == r.num always holds.
+export def micro_whole(rate) {
+    require_rate(rate)
+    return rate.num // rate.den
+}
+
+export def micro_remainder(rate) {
+    require_rate(rate)
+    return rate.num % rate.den
+}
+
+export def check_rate(rate) {
+    return require_rate(rate)
+}

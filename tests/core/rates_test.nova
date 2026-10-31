@@ -1,0 +1,32 @@
+# module: rates
+# expect: 13
+#
+# Golden values for src/core/rates.nova.
+
+import "../../tools/check.nova" as t
+import "../../src/core/rates.nova" as rates
+
+t.check("MICRO is 1e6", rates.MICRO, 1000000)
+t.check("annual 6.5%", rates.annual(65000), {num: 65000, den: 1})
+
+let monthly = rates.per_period(rates.annual(65000), 12)
+t.check("per_period carries the remainder in den", monthly, {num: 65000, den: 12})
+t.check("whole micro-units per month", rates.micro_whole(monthly), 5416)
+t.check("carried remainder", rates.micro_remainder(monthly), 8)
+t.check("whole * den + remainder == num", rates.micro_whole(monthly) * monthly.den + rates.micro_remainder(monthly), 65000)
+t.check("per_period composes", rates.per_period(monthly, 2), {num: 65000, den: 24})
+
+let negative = rates.per_period(rates.annual(-1000), 12)
+t.check("negative rate whole part floors", rates.micro_whole(negative), -84)
+t.check("negative rate remainder is non-negative", rates.micro_remainder(negative), 8)
+
+def zero_periods() { rates.per_period(rates.annual(65000), 0) }
+t.check_throws("zero periods is rejected", zero_periods, "periods")
+def fractional_micro() { rates.annual(6.5) }
+t.check_throws("fractional micro-units are rejected", fractional_micro, "whole number")
+def bad_struct() { rates.micro_whole({num: 1}) }
+t.check_throws("a struct without den is rejected", bad_struct, "expected a rate")
+def zero_den() { rates.check_rate({num: 1, den: 0}) }
+t.check_throws("den below 1 is rejected", zero_den, "den")
+
+t.finish()

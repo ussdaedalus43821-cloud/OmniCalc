@@ -1,0 +1,325 @@
+# src/finance/tvm.nova - time value of money: solve for any one of pv, fv,
+# pmt, n or rate from the other four.
+#
+# ---- Conventions ----
+# Signs: cash you receive is positive, cash you pay out is negative. A loan
+#   you take out has pv > 0 (you receive it) and pmt < 0 (you pay it back);
+#   a savings plan has pmt < 0 (deposits) and fv > 0 (what you get back).
+# Periods: payments fall at the END of each period. `rate` is the rate PER
+#   PERIOD, a {num, den} from src/core/rates.nova; converting an annual rate
+#   is the caller's job (rates.per_period(rates.annual(65000), 12)). n is a
+#   whole number of periods.
+# Money arguments and results are {minor, scale, currency}
+#   (src/core/money.nova), and must all share one scale and currency.
+#
+# Every function solves the same equation:
+#     pv * (1 + r)^n  +  pmt * ((1 + r)^n - 1) / r  +  fv  =  0
+# (at r = 0 the middle term is pmt * n). With r = num / D, where
+# D = den * MICRO, write A = (D + num)^n and B = D^n; multiplying through
+# by B * num gives an equation in integers only:
+#     pv * A * num  +  pmt * (A - B) * D  +  fv * B * num  =  0
+# pow() on ints is exact (Python's int ** int, Nova_Lang/novalang.py:1932-1936),
+# so fv, pv and pmt are computed exactly and rounded half-up once, at the
+# end (money.round_half_up).
+#
+# ---- Solvers ----
+# n: closed form, (1 + r)^n = (pmt*D - fv*num) / (pv*num + pmt*D), so
+#   n = ln(that ratio) / ln(1 + r), in floats (allowed for solvers; see
+#   CLAUDE.md). At r = 0 it is -(pv + fv) / pmt. No summation fallback is
+#   needed: when this has no positive real solution, no number of periods
+#   works, and n() throws.
+# rate: bisection on the exact residual - never on rounded minor units,
+#   which would make the residual a step function of the rate. See
+#   CLAUDE.md "Solver rules" for the bracket search, tolerance and checks.
+#   MULTIPLE ROOTS: unusual cash flows (an intermediate inflow, e.g. -100,
+#   +230, -132) can have more than one rate. rate() returns the SMALLEST
+#   POSITIVE root, the same convention as Excel's RATE: the bracket search
+#   walks upward from zero first and stops at the first sign change.
+#   Known limit: two roots between the same pair of neighbouring candidates
+#   (e.g. 10% and 12%, both between 6.4% and 12.8%) produce no sign change
+#   there and are missed. NPV/IRR (M3) needs a finer scan for this.
+
+import "../core/numbers.nova" as numbers
+import "../core/money.nova" as money
+import "../core/rates.nova" as rates
+
+let MICRO = rates.MICRO
+
+# Rate bisection stops when the bracket is no wider than 1e-12 per period,
+# i.e. (hi - lo) / (Q * MICRO) <= 1e-12, which is (hi - lo) * WIDTH_FACTOR <= Q.
+let WIDTH_FACTOR = 1000000
+let MAX_BISECTIONS = 200
+
+def scale_up(k) {
+    return 1000 * pow(2, k)
+}
+
+# The rates tried, in micro-units per period, when searching outward from
+# zero for a sign change: 0.1%, 0.2%, 0.4% ... up to ~104,858% upward, and
+# -0.1% ... -51.2%, then towards -100% (exclusive) downward.
+let UP_CANDIDATES = map(scale_up, range(21))
+let DOWN_CANDIDATES = [-1000, -2000, -4000, -8000, -16000, -32000, -64000, -128000, -256000, -512000, -750000, -900000, -990000, -999000, -999900]
+
+
+def require_periods(n, least) {
+    let whole = numbers.require_whole(n, "n", "tvm")
+    if whole < least {
+        throw("tvm: n must be at least " + str(least) + ", got " + str(n))
+    }
+    return whole
+}
+
+def require_rate(rate) {
+    rates.check_rate(rate)
+    if rate.num <= 0 - rate.den * MICRO {
+        throw("tvm: rate must be above -100% per period, got " + str(rate.num) + "/" + str(rate.den) + " micro-units")
+    }
+    return rate
+}
+
+def same_unit(amounts) {
+    for amount in amounts {
+        money.check_same_unit(amounts[0], amount)
+    }
+    return amounts[0]
+}
+
+def result(template, minor) {
+    return money.make(minor, template.scale, template.currency)
+}
+
+def sign(x) {
+    if x > 0 {
+        return 1
+    }
+    if x < 0 {
+        return -1
+    }
+    return 0
+}
+
+# ---- integer cores: minor units in, exact or rounded minor units out ----
+
+def fv_minor(pv, pmt, n, rate) {
+    if rate.num == 0 {
+        return 0 - (pv + pmt * n)
+    }
+    let d = rate.den * MICRO
+    let a = pow(d + rate.num, n)
+    let b = pow(d, n)
+    return money.round_half_up(0 - (pv * a * rate.num + pmt * (a - b) * d), b * rate.num)
+}
+
+def pv_minor(fv, pmt, n, rate) {
+    if rate.num == 0 {
+        return 0 - (fv + pmt * n)
+    }
+    let d = rate.den * MICRO
+    let a = pow(d + rate.num, n)
+    let b = pow(d, n)
+    return money.round_half_up(0 - (fv * b * rate.num + pmt * (a - b) * d), a * rate.num)
+}
+
+# The exact payment as [numerator, denominator] minor units (denominator > 0).
+def pmt_fraction(pv, fv, n, rate) {
+    if rate.num == 0 {
+        return [0 - (pv + fv), n]
+    }
+    let d = rate.den * MICRO
+    let a = pow(d + rate.num, n)
+    let b = pow(d, n)
+    if a > b {
+        return [0 - (pv * a + fv * b) * rate.num, (a - b) * d]
+    }
+    return [(pv * a + fv * b) * rate.num, (b - a) * d]
+}
+
+def pmt_minor(pv, fv, n, rate) {
+    let f = pmt_fraction(pv, fv, n, rate)
+    return money.round_half_up(f[0], f[1])
+}
+
+# Sign of the residual pv*(1+r)^n + pmt*((1+r)^n - 1)/r + fv, evaluated
+# exactly at r = k / (q * MICRO).
+def residual_sign(pv, fv, pmt, n, k, q) {
+    if k == 0 {
+        return sign(pv + pmt * n + fv)
+    }
+    let d = q * MICRO
+    let a = pow(d + k, n)
+    let b = pow(d, n)
+    return sign(pv * a * k + pmt * (a - b) * d + fv * b * k) * sign(k)
+}
+
+def reduced(numerator, denominator) {
+    let r = {num: numerator, den: denominator}
+    while r.den > 1 and r.num % 2 == 0 and r.den % 2 == 0 {
+        r["num"] = r.num // 2
+        r["den"] = r.den // 2
+    }
+    return r
+}
+
+# The first bracket [lo, hi] (micro-units per period, lo < hi) with a sign
+# change, walking outward from zero: the positive side first, then the
+# negative side. The positive side wins because a conventional loan or
+# savings plan has a positive rate.
+def find_bracket(pv, fv, pmt, n) {
+    let s0 = residual_sign(pv, fv, pmt, n, 0, 1)
+    if s0 == 0 {
+        return {exact: 0}
+    }
+    let previous = {k: 0}
+    for k in UP_CANDIDATES {
+        let s = residual_sign(pv, fv, pmt, n, k, 1)
+        if s == 0 {
+            return {exact: k}
+        }
+        if s != s0 {
+            return {lo: previous.k, hi: k, s_lo: s0}
+        }
+        previous["k"] = k
+    }
+    previous["k"] = 0
+    for k in DOWN_CANDIDATES {
+        let s = residual_sign(pv, fv, pmt, n, k, 1)
+        if s == 0 {
+            return {exact: k}
+        }
+        if s != s0 {
+            return {lo: k, hi: previous.k, s_lo: s}
+        }
+        previous["k"] = k
+    }
+    throw("tvm: no rate between -99.99% and 1,048,576% per period solves these cash flows")
+}
+
+def bisect_rate(pv, fv, pmt, n) {
+    let bracket = find_bracket(pv, fv, pmt, n)
+    if "exact" in bracket {
+        return {num: bracket.exact, den: 1}
+    }
+    let state = {lo: bracket.lo, hi: bracket.hi, q: 1, s_lo: bracket.s_lo}
+    for i = 1 to MAX_BISECTIONS {
+        if (state.hi - state.lo) * WIDTH_FACTOR <= state.q {
+            return reduced(state.lo + state.hi, 2 * state.q)
+        }
+        let mid = state.lo + state.hi
+        state["lo"] = 2 * state.lo
+        state["hi"] = 2 * state.hi
+        state["q"] = 2 * state.q
+        let s = residual_sign(pv, fv, pmt, n, mid, state.q)
+        if s == 0 {
+            return reduced(mid, state.q)
+        }
+        if s == state.s_lo {
+            state["lo"] = mid
+        } else {
+            state["hi"] = mid
+        }
+    }
+    throw("tvm: rate did not converge in " + str(MAX_BISECTIONS) + " bisections")
+}
+
+# ---- the five solvers ----
+
+export def fv(pv, pmt, n, rate) {
+    let unit = same_unit([pv, pmt])
+    return result(unit, fv_minor(pv.minor, pmt.minor, require_periods(n, 0), require_rate(rate)))
+}
+
+export def pv(fv, pmt, n, rate) {
+    let unit = same_unit([fv, pmt])
+    return result(unit, pv_minor(fv.minor, pmt.minor, require_periods(n, 0), require_rate(rate)))
+}
+
+export def pmt(pv, fv, n, rate) {
+    let unit = same_unit([pv, fv])
+    return result(unit, pmt_minor(pv.minor, fv.minor, require_periods(n, 1), require_rate(rate)))
+}
+
+# The same payment as pmt(), unrounded: {num, den, scale, currency} meaning
+# num / den minor units. For callers that need a different rounding
+# direction - e.g. a savings goal, which rounds the contribution UP.
+export def pmt_exact(pv, fv, n, rate) {
+    let unit = same_unit([pv, fv])
+    let f = pmt_fraction(pv.minor, fv.minor, require_periods(n, 1), require_rate(rate))
+    return {num: f[0], den: f[1], scale: unit.scale, currency: unit.currency}
+}
+
+# Returns {exact, periods}. `exact` is the real-valued solution (a float)
+# and is the only value financial logic may use. `periods` is a DISPLAY
+# convenience - see whole_periods() and docs/ESCAPE-HATCHES.md "Known
+# approximations".
+let PERIOD_SLACK = 0.0001
+
+export def n(pv, fv, pmt, rate) {
+    same_unit([pv, fv, pmt])
+    require_rate(rate)
+    let exact = n_exact(pv.minor, fv.minor, pmt.minor, rate)
+    if exact <= 0 {
+        throw("tvm: no positive number of periods solves these cash flows")
+    }
+    return {exact: exact, periods: whole_periods(exact)}
+}
+
+# The rule for n().periods, exactly: let f = floor(exact). If
+# exact - f < 1e-4, report f; otherwise report f + 1. The result is never
+# below 1. The slack absorbs a target rounded to a minor unit (a 120-period
+# savings plan solves to 120.0000125); it is not a mathematical truth.
+export def whole_periods(exact) {
+    if not numbers.is_finite(exact) or exact <= 0 {
+        throw("tvm: whole_periods needs a positive finite number, got " + str(exact))
+    }
+    let f = floor(exact)
+    let whole = f + 1
+    if exact - f < PERIOD_SLACK {
+        whole = f
+    }
+    if whole < 1 {
+        return 1
+    }
+    return whole
+}
+
+def n_exact(pv, fv, pmt, rate) {
+    if rate.num == 0 {
+        if pmt == 0 {
+            throw("tvm: at a zero rate with no payment, no number of periods solves these cash flows")
+        }
+        return (0 - (pv + fv)) / pmt
+    }
+    let d = rate.den * MICRO
+    let top = pmt * d - fv * rate.num
+    let bottom = pv * rate.num + pmt * d
+    if bottom == 0 {
+        throw("tvm: the payment exactly covers the interest, so the balance never changes")
+    }
+    if top == 0 or sign(top) != sign(bottom) {
+        throw("tvm: no number of periods solves these cash flows")
+    }
+    return (ln(abs(top)) - ln(abs(bottom))) / (ln(d + rate.num) - ln(d))
+}
+
+# Returns the rate per period as a {num, den} (micro-units,
+# den a power of two), within 1e-12 per period of the exact root. It is not
+# rounded to a micro-unit; display rounding happens only at display. Before
+# returning it is verified at minor-unit precision: recomputing pmt (or fv,
+# when pmt is zero) at the solved rate must reproduce the input within one
+# minor unit.
+export def rate(pv, fv, pmt, n) {
+    same_unit([pv, fv, pmt])
+    let periods = require_periods(n, 1)
+    let solved = bisect_rate(pv.minor, fv.minor, pmt.minor, periods)
+    let check = {expected: pmt.minor, got: 0}
+    if pmt.minor == 0 {
+        check["expected"] = fv.minor
+        check["got"] = fv_minor(pv.minor, 0, periods, solved)
+    } else {
+        check["got"] = pmt_minor(pv.minor, fv.minor, periods, solved)
+    }
+    if abs(check.got - check.expected) > 1 {
+        throw("tvm: the solved rate reproduces " + str(check.got) + " instead of " + str(check.expected) + " minor units")
+    }
+    return solved
+}

@@ -1,0 +1,60 @@
+# src/app/parse_helpers.nova - the input parsing every screen facade shares.
+#
+# Extracted in M6 when the third copy appeared (CLAUDE.md "Screen facades").
+# Before extraction the copies had drifted: amortization_screen's amount()
+# accepted negative amounts (leaving amortization.nova to reject them later,
+# with a different message) while the other two rejected them at parse time.
+# Every amount is now rejected at parse time.
+#
+# Rates are typed as annual percentages with up to 4 decimals, which is
+# exactly micro-units of a fraction: "6.5" -> 65000. Whether a negative rate
+# is allowed is a per-screen domain choice (a savings account can have one, a
+# loan cannot), so it is a parameter, not a copy.
+
+import "../core/parse.nova" as parse
+import "../core/money.nova" as money
+import "../core/rates.nova" as rates
+
+export let CURRENCY = "USD"
+export let SCALE = 2
+export let RATE_INPUT_SCALE = 4
+export let MONTHS_PER_YEAR = 12
+
+# Non-negative money at SCALE / CURRENCY.
+export def amount(text, what) {
+    let minor = parse.decimal(text, SCALE, what)
+    if minor < 0 {
+        throw("parse: " + what + " must not be negative")
+    }
+    return money.make(minor, SCALE, CURRENCY)
+}
+
+# An annual percentage -> micro-units. allow_negative: false rejects any
+# negative rate; true allows down to (not including) -100%.
+export def annual_rate_micro(text, what, allow_negative) {
+    let micro = parse.decimal(text, RATE_INPUT_SCALE, what)
+    if allow_negative {
+        if micro <= 0 - rates.MICRO {
+            throw("parse: " + what + " must be above -100%")
+        }
+    } else {
+        if micro < 0 {
+            throw("parse: " + what + " must not be negative")
+        }
+    }
+    return micro
+}
+
+# An annual percentage -> the exact monthly rate {num, den} (annual / 12).
+export def monthly_rate(text, what, allow_negative) {
+    return rates.per_period(rates.annual(annual_rate_micro(text, what, allow_negative)), MONTHS_PER_YEAR)
+}
+
+# A whole number in least..most.
+export def count(text, what, least, most) {
+    let value = parse.whole(text, what)
+    if value < least or value > most {
+        throw("parse: " + what + " must be " + str(least) + "-" + str(most) + ", got " + str(value))
+    }
+    return value
+}

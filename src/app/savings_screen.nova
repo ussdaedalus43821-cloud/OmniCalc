@@ -1,0 +1,140 @@
+# src/app/savings_screen.nova - the savings screen's calculation, behind one
+# call for the Python host. Same contract as amortization_screen.nova: input
+# boxes as typed (strings) in; integers, scales and strings out.
+#
+# SOLVE FOR ANY VARIABLE (CLAUDE.md "Engineering rules"), by `mode`:
+#   "fv"  - future value, from initial, contribution, rate and years
+#   "pmt" - the monthly contribution needed to reach `target` in `years`
+#   "n"   - the time needed to reach `target` with `contribution`
+# Inputs a mode does not use are ignored (they may be left as typed).
+#
+# Convention (the only one in v1): contributions are made at the END of each
+# month, like loan payments (an ordinary annuity); monthly rate = annual / 12;
+# balances are tvm.fv, rounded half-up to the cent. Start-of-month timing is
+# deliberately not offered.
+# SOLVED CONTRIBUTIONS ROUND UP SO THE GOAL IS REACHED; SOLVED PERIODS ROUND UP
+# FOR THE SAME REASON. (Half-up could land a cent short: $1,000,000 in 30 years
+# at 7% is 753.1614.../month, which half-up makes 753.16 and $1.67 short.) The
+# screen shows the honest final balance and the margin over the target.
+
+import "./parse_helpers.nova" as inputs
+import "../core/money.nova" as money
+import "../finance/tvm.nova" as tvm
+
+let MAX_YEARS = 100
+let MONTHS_PER_YEAR = inputs.MONTHS_PER_YEAR
+
+let ASSUMPTIONS = [
+    "Contributions are monthly, at the end of each month (none at the start).",
+    "Monthly rate = annual rate / 12, compounded monthly, kept exact.",
+    "Balance = the TVM future-value closed form, rounded half-up to the cent.",
+    "A solved monthly contribution is rounded UP to the cent, so the target is always reached; the margin is shown.",
+    "Time to goal is the first whole month the balance reaches the target (also rounded up); the last row stops at that month.",
+    "Interest earned = balance - (initial deposit + contributions so far)."
+]
+
+def time_text(months) {
+    let years = months // MONTHS_PER_YEAR
+    let rest = months % MONTHS_PER_YEAR
+    let parts = []
+    if years > 0 {
+        let unit = " years"
+        if years == 1 {
+            unit = " year"
+        }
+        append(parts, str(years) + unit)
+    }
+    if rest > 0 {
+        let unit = " months"
+        if rest == 1 {
+            unit = " month"
+        }
+        append(parts, str(rest) + unit)
+    }
+    return join(parts, " ")
+}
+
+# Yearly rows up to `months` (the last row stops at `months` when it is not
+# a whole number of years): [year, contributed, interest_earned, balance].
+def yearly_rows(initial, contribution, monthly, months) {
+    let deposit = money.negate(initial)
+    let payment = money.negate(contribution)
+    let rows = []
+    let last_year = (months + MONTHS_PER_YEAR - 1) // MONTHS_PER_YEAR
+    for year = 1 to last_year {
+        let at = year * MONTHS_PER_YEAR
+        if at > months {
+            at = months
+        }
+        let balance = tvm.fv(deposit, payment, at, monthly).minor
+        let contributed = initial.minor + contribution.minor * at
+        append(rows, [year, contributed, balance - contributed, balance])
+    }
+    return rows
+}
+
+export def calculate(mode, initial_text, contribution_text, rate_text, years_text, target_text) {
+    let initial = inputs.amount(initial_text, "initial deposit")
+    let monthly = inputs.monthly_rate(rate_text, "annual rate", true)
+    let zero = money.make(0, inputs.SCALE, inputs.CURRENCY)
+    let solved = {contribution: zero, months: 0, target: -1}
+    if mode == "fv" {
+        solved["contribution"] = inputs.amount(contribution_text, "monthly contribution")
+        solved["months"] = inputs.count(years_text, "years", 1, MAX_YEARS) * MONTHS_PER_YEAR
+    } else if mode == "pmt" {
+        let target = inputs.amount(target_text, "target amount")
+        let months = inputs.count(years_text, "years", 1, MAX_YEARS) * MONTHS_PER_YEAR
+        let exact = tvm.pmt_exact(money.negate(initial), target, months, monthly)
+        let needed = money.round_ceiling(0 - exact.num, exact.den)
+        if needed <= 0 {
+            throw("savings: the initial deposit alone reaches the target in that time, so no monthly contribution is needed")
+        }
+        solved["contribution"] = money.make(needed, inputs.SCALE, inputs.CURRENCY)
+        solved["months"] = months
+        solved["target"] = target.minor
+    } else if mode == "n" {
+        let target = inputs.amount(target_text, "target amount")
+        let contribution = inputs.amount(contribution_text, "monthly contribution")
+        if money.compare(target, initial) <= 0 {
+            throw("savings: the initial deposit already reaches the target")
+        }
+        let answer = tvm.n(money.negate(initial), target, money.negate(contribution), monthly)
+        if answer.periods > MAX_YEARS * MONTHS_PER_YEAR {
+            throw("savings: reaching the target takes more than " + str(MAX_YEARS) + " years")
+        }
+        # tvm.n's periods ignores an overshoot under 1e-4 of a period (a display
+        # convenience); here the goal must actually be reached, so check it.
+        let months = answer.periods
+        while tvm.fv(money.negate(initial), money.negate(contribution), months, monthly).minor < target.minor {
+            months = months + 1
+        }
+        solved["contribution"] = contribution
+        solved["months"] = months
+        solved["target"] = target.minor
+    } else {
+        throw("savings: mode must be fv, pmt or n, got " + str(mode))
+    }
+
+    let rows = yearly_rows(initial, solved.contribution, monthly, solved.months)
+    let last = rows[len(rows) - 1]
+    let goal = {before: "no target in this mode", after: ""}
+    if solved.target >= 0 {
+        goal = {before: "reaches the target with ", amount: last[3] - solved.target, after: " to spare"}
+    }
+    return {
+        currency: inputs.CURRENCY,
+        scale: inputs.SCALE,
+        mode: mode,
+        future_value: last[3],
+        monthly_contribution: solved.contribution.minor,
+        months: solved.months,
+        time: time_text(solved.months),
+        goal: goal,
+        total_contributed: last[1],
+        total_interest: last[2],
+        columns: ["year", "contributed", "interest_earned", "balance"],
+        column_kinds: ["count", "money", "money", "money"],
+        rows: rows,
+        assumptions: ASSUMPTIONS
+    }
+}

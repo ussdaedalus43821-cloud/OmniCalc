@@ -1,0 +1,215 @@
+# module: cashflow
+# expect: 72
+#
+# Reference values come from tests/finance/gen_cashflow_vectors.py, a separate
+# Python implementation: NPV summed term by term, IRR by plain bisection,
+# payback by walking the running total. Re-run it to regenerate.
+#
+# Like TVM (tests/finance/tvm_test.nova), the schedule round-trip is checked
+# in two parts. At cents, a schedule's IRR is NOT exactly its loan rate:
+# interest is rounded to the cent every period (360 roundings, -3.68 cents in
+# total on the canonical schedule), which moves the IRR by 1.19e-9. So at
+# cents the IRR is checked against the exact reference, and the
+# "back to the loan rate within 1e-9" check runs at scale 6.
+#
+# Section 9 (XNPV/XIRR) uses tests/finance/gen_xcashflow_vectors.py (50-digit
+# decimal) and Microsoft's published XNPV/XIRR example. XIRR is computed with
+# float discount factors, so it is compared with the references at 1e-11
+# rather than 1e-12.
+
+import "../../tools/check.nova" as t
+import "../../src/core/money.nova" as money
+import "../../src/core/rates.nova" as rates
+import "../../src/finance/tvm.nova" as tvm
+import "../../src/finance/amortization.nova" as am
+import "../../src/finance/cashflow.nova" as cf
+import "../../src/core/dates.nova" as dates
+
+def usd(minor) {
+    return money.make(minor, 2, "USD")
+}
+
+def flow(period, minor) {
+    return {period: period, amount: usd(minor)}
+}
+
+# |a - b| <= 10^-digits, both rates per period, compared exactly in integers.
+def rates_within(a, b, digits) {
+    let gap = abs(a.num * b.den - b.num * a.den)
+    return gap * pow(10, digits) <= a.den * b.den * rates.MICRO
+}
+
+let ten_percent = rates.annual(100000)
+let monthly_65 = rates.per_period(rates.annual(65000), 12)
+let one_period = [flow(0, -100000), flow(1, 110000)]
+let multi = [flow(0, -100000), flow(1, 30000), flow(2, 42000), flow(3, 68000), flow(5, 12000)]
+
+# ---- 1. NPV ----
+t.check("npv: -1,000 then +1,100 at 10% is exactly zero", cf.npv(ten_percent, one_period), usd(0))
+t.check("npv: multi-flow at 10% (with an empty period 4)", cf.npv(ten_percent, multi), usd(20524))
+t.check("npv: at a zero rate it is the plain sum", cf.npv(rates.annual(0), multi), usd(52000))
+t.check("npv: flows in one period add up", cf.npv(ten_percent, [flow(0, -10000), flow(0, -90000), flow(1, 110000)]), usd(0))
+t.check("npv: the order of the flows does not matter", cf.npv(ten_percent, [flow(5, 12000), flow(2, 42000), flow(0, -100000), flow(3, 68000), flow(1, 30000)]), usd(20524))
+
+# ---- 2. IRR, one sign change ----
+let single = cf.irr(one_period)
+t.check("irr: one sign change gives one root", len(single), 1)
+t.check_true("irr: -1,000 then +1,100 is 10% within 1e-9", rates_within(single[0], ten_percent, 9))
+t.check_true("irr: multi-flow within 1e-12 of the reference", rates_within(cf.irr(multi)[0], {num: 191291367439284343738258179973, den: 1000000000000000000000000}, 12))
+t.check_true("irr: npv at the multi-flow irr is zero", money.compare(cf.npv(cf.irr(multi)[0], multi), usd(0)) == 0)
+
+# ---- 3. IRR, several sign changes ----
+# -100, +230, -132: the residual -100g^2 + 230g - 132 has roots g = 1.1, 1.2.
+let two_root_flows = [flow(0, -10000), flow(1, 23000), flow(2, -13200)]
+let two_roots = cf.irr(two_root_flows)
+t.check("two roots: both are found", len(two_roots), 2)
+t.check_true("two roots: the first is 10%", rates_within(two_roots[0], ten_percent, 9))
+t.check_true("two roots: the second is 20%", rates_within(two_roots[1], rates.annual(200000), 9))
+t.check_true("two roots: sorted ascending", two_roots[0].num * two_roots[1].den < two_roots[1].num * two_roots[0].den)
+t.check_true("irr_min_nonneg: returns 10%", rates_within(cf.irr_min_nonneg(two_root_flows), ten_percent, 9))
+
+# Roots only 10 bp apart: -100, +220.10, -121.11 has roots 10% and 10.1%.
+let close_flows = [flow(0, -10000), flow(1, 22010), flow(2, -12111)]
+let close_roots = cf.irr(close_flows)
+t.check("10 bp apart: both are found", len(close_roots), 2)
+t.check_true("10 bp apart: 10%", rates_within(close_roots[0], ten_percent, 9))
+t.check_true("10 bp apart: 10.1%", rates_within(close_roots[1], rates.annual(101000), 9))
+# The same cash flows through tvm.rate: both roots sit between its 6.4% and
+# 12.8% candidates, so it finds no sign change (the limit documented in
+# tvm.nova). This is why IRR has its own search.
+def tvm_misses_close_roots() { tvm.rate(usd(-10000), usd(-34121), usd(22010), 2) }
+t.check_throws("10 bp apart: tvm.rate misses them, as documented", tvm_misses_close_roots, "no rate")
+
+# ---- 4. no root, or no positive root ----
+t.check("no sign change: no roots", cf.irr([flow(0, -10000), flow(1, -5000)]), [])
+def none_at_all() { cf.irr_min_nonneg([flow(0, -10000), flow(1, -5000)]) }
+t.check_throws("no sign change: irr_min_nonneg throws", none_at_all, "no IRR in the search range")
+t.check("two sign changes but no real root: no roots", cf.irr([flow(0, 10000), flow(1, -10000), flow(2, 10000)]), [])
+let negative_only = [flow(0, -10000), flow(1, 9000)]
+t.check_true("only a negative root: irr finds -10%", rates_within(cf.irr(negative_only)[0], rates.annual(-100000), 9))
+def none_positive() { cf.irr_min_nonneg(negative_only) }
+t.check_throws("only a negative root: irr_min_nonneg throws", none_positive, "no non-negative IRR")
+
+# ---- 5. from_schedule: the integration test for the sign-flip adapter ----
+let canonical = am.schedule(usd(20000000), monthly_65, 360, usd(126414))
+let borrower = cf.from_schedule(canonical)
+t.check("from_schedule: one flow per row plus the principal", len(borrower), 361)
+t.check("from_schedule: the principal is received at period 0", borrower[0], flow(0, 20000000))
+t.check("from_schedule: payments are paid out (negative)", borrower[1], flow(1, -126414))
+t.check("from_schedule: the final adjusted payment", borrower[360], flow(360, -125956))
+let schedule_rate = cf.irr_min_nonneg(borrower)
+t.check_true("schedule irr: within 1e-12 of the reference", rates_within(schedule_rate, {num: 5416665479554547422276080896, den: 1000000000000000000000000}, 12))
+t.check_true("schedule irr: within 2e-9 of 6.5%/12 (cent rounding costs 1.19e-9)", rates_within(schedule_rate, {num: 65000, den: 12}, 9) == false and abs(schedule_rate.num * 12 - 65000 * schedule_rate.den) * 1000000000 <= 2 * schedule_rate.den * 12 * rates.MICRO)
+let extra = am.schedule_with_extra(usd(20000000), monthly_65, 360, usd(126414), usd(10534), [])
+t.check_true("extra-payment schedule irr: within 1e-12 of the reference", rates_within(cf.irr_min_nonneg(cf.from_schedule(extra)), {num: 5416667984572875485423221323, den: 1000000000000000000000000}, 12))
+let fine_principal = money.make(200000000000, 6, "USD")
+let fine_payment = money.negate(tvm.pmt(fine_principal, money.make(0, 6, "USD"), 360, monthly_65))
+t.check("scale-6 schedule payment", fine_payment, money.make(1264136047, 6, "USD"))
+let fine_rate = cf.irr_min_nonneg(cf.from_schedule(am.schedule(fine_principal, monthly_65, 360, fine_payment)))
+t.check_true("scale-6 schedule irr: back to 6.5%/12 within 1e-9", rates_within(fine_rate, monthly_65, 9))
+def empty_schedule() { cf.from_schedule({rows: [], totals: {}}) }
+t.check_throws("from_schedule rejects an empty schedule", empty_schedule, "at least one row")
+
+# ---- 6. payback ----
+t.check("payback: crosses zero 4/5 of the way into period 3", cf.payback([flow(0, -100000), flow(1, 30000), flow(2, 30000), flow(3, 50000)]), {period: 3, exact: {num: 14, den: 5}})
+t.check("payback: interpolates across empty periods", cf.payback([flow(0, -10000), flow(2, 6000), flow(5, 6000)]), {period: 5, exact: {num: 4, den: 1}})
+def never_pays_back() { cf.payback([flow(0, -10000), flow(1, 3000)]) }
+t.check_throws("payback: never reaching zero throws", never_pays_back, "never reaches zero")
+def starts_positive() { cf.payback([flow(0, 10000), flow(1, -3000)]) }
+t.check_throws("payback: a positive first flow throws", starts_positive, "first non-zero flow to be negative")
+
+# ---- 7. rejected inputs ----
+def no_flows() { cf.npv(ten_percent, []) }
+t.check_throws("empty flows", no_flows, "non-empty list")
+def mixed_currency() { cf.npv(ten_percent, [flow(0, -100), {period: 1, amount: money.make(110, 2, "EUR")}]) }
+t.check_throws("mixed currencies", mixed_currency, "same currency and scale")
+def fractional_period() { cf.npv(ten_percent, [flow(0.5, -100), flow(1, 110)]) }
+t.check_throws("fractional period", fractional_period, "whole number")
+def negative_period() { cf.npv(ten_percent, [flow(-1, -100), flow(1, 110)]) }
+t.check_throws("negative period", negative_period, "period must be 0-")
+def malformed_flow() { cf.npv(ten_percent, [{when: 0, amount: usd(-100)}]) }
+t.check_throws("malformed flow", malformed_flow, "must be {period, amount}")
+def minus_100() { cf.npv(rates.annual(-1000000), one_period) }
+t.check_throws("npv rate of -100% per period", minus_100, "above -100%")
+let long_two_sign = [flow(0, -10000), flow(1, 23000), flow(61, -13200)]
+def too_long() { cf.irr(long_two_sign) }
+t.check_throws("multi-root cap: the message names the cap", too_long, "supports at most 60 periods")
+t.check_throws("multi-root cap: the message says why", too_long, "needed when flows change sign more than once")
+t.check_throws("multi-root cap: the message points to the escape-hatch doc", too_long, "docs/ESCAPE-HATCHES.md")
+t.check("one sign change is not capped (361 flows above)", len(cf.irr(borrower)), 1)
+
+# ---- 8. added before M4: 0% counts, and the unchecked schedule path ----
+t.check("[-100, +100] has an IRR of exactly 0%", cf.irr_min_nonneg([flow(0, -10000), flow(1, 10000)]), {num: 0, den: 1})
+t.check("schedule_irr agrees with the checked path (canonical)", cf.schedule_irr(canonical), cf.irr_min_nonneg(cf.from_schedule(canonical)))
+t.check("schedule_irr agrees with the checked path (extra payments)", cf.schedule_irr(extra), cf.irr_min_nonneg(cf.from_schedule(extra)))
+def schedule_irr_empty() { cf.schedule_irr({rows: [], totals: {}}) }
+t.check_throws("schedule_irr rejects an empty schedule", schedule_irr_empty, "at least one row")
+
+# ---- 9. XNPV / XIRR (M4) ----
+def dated(serial, minor) {
+    return {date_serial: serial, amount: usd(minor)}
+}
+def on(y, m, d, minor) {
+    return dated(dates.from_civil(y, m, d).serial, minor)
+}
+let day0 = dates.from_civil(2024, 1, 15).serial
+let year_pair = [dated(day0, -100000), dated(day0 + 365, 110000)]
+t.check("xnpv: -1,000 then +1,100 a 365-day year later at 10% is zero", cf.xnpv(ten_percent, year_pair), usd(0))
+t.check_true("xirr: the same pair is 10% within 1e-9", rates_within(cf.xirr(year_pair), ten_percent, 9))
+
+# Microsoft's XNPV/XIRR documentation example.
+let excel = [on(2008, 1, 1, -1000000), on(2008, 3, 1, 275000), on(2008, 10, 30, 425000), on(2009, 2, 15, 325000), on(2009, 4, 1, 275000)]
+t.check("excel: XNPV(9%) = 2,086.65", cf.xnpv(rates.annual(90000), excel), usd(208665))
+let excel_rate = cf.xirr(excel)
+# Excel's own XIRR is only accurate to 1e-8: Microsoft documents that it
+# iterates "until the result is accurate within 0.000001 percent". The exact
+# root is 0.37336253352, 1.5e-9 from Excel's 0.373362535, so Excel is checked
+# at its documented tolerance and the exact value at 1e-11 below.
+t.check_true("excel: XIRR matches Excel's 0.373362535 within its 1e-8 tolerance", rates_within(excel_rate, {num: 373362535, den: 1000}, 8))
+t.check_true("excel: XIRR within 1e-11 of the 50-digit reference", rates_within(excel_rate, {num: 373362533518831510308455411915, den: 1000000000000000000000000}, 11))
+
+# Irregular gaps: 30, 45 and 400 days.
+let gaps = [dated(day0, -1000000), dated(day0 + 30, 200000), dated(day0 + 75, 300000), dated(day0 + 475, 650000)]
+t.check("gaps: xnpv at 7%", cf.xnpv(rates.annual(70000), gaps), usd(89964))
+t.check_true("gaps: xirr within 1e-11 of the reference", rates_within(cf.xirr(gaps), {num: 197905799988619913249619319103, den: 1000000000000000000000000}, 11))
+
+# Actual/365 annualizes: +5% after 180 days is 1.05^(365/180) - 1 = 10.40% a
+# year, not the 5% that irr() reports for the same flows as one period.
+let half_year = [dated(day0, -100000), dated(day0 + 180, 105000)]
+let annualized = cf.xirr(half_year)
+t.check_true("180 days: xirr is 1.05^(365/180) - 1", rates_within(annualized, {num: 103995211765871958024082921198, den: 1000000000000000000000000}, 11))
+t.check_true("180 days: irr of the same flows as one period is 5%", rates_within(cf.irr([flow(0, -100000), flow(1, 105000)])[0], rates.annual(50000), 9))
+t.check("180 days: xirr and irr differ", rates_within(annualized, rates.annual(50000), 3), false)
+
+# Round trip at scale 6: the first flow makes XNPV(8%) zero (from the
+# generator), so XNPV -> XIRR must give back 8% within 1e-9, and XNPV at
+# that XIRR must be zero again.
+def micro_dated(serial, minor) {
+    return {date_serial: serial, amount: money.make(minor, 6, "USD")}
+}
+let round_trip = [micro_dated(day0, -11045911161), micro_dated(day0 + 100, 3000000000), micro_dated(day0 + 250, 4000000000), micro_dated(day0 + 700, 5000000000)]
+t.check("round trip: XNPV at 8% is zero", cf.xnpv(rates.annual(80000), round_trip), money.make(0, 6, "USD"))
+let back = cf.xirr(round_trip)
+t.check_true("round trip: XIRR gives back 8% within 1e-9", rates_within(back, rates.annual(80000), 9))
+t.check("round trip: XNPV at that XIRR is zero", cf.xnpv(back, round_trip), money.make(0, 6, "USD"))
+
+t.check("same-day flows add up", cf.xnpv(ten_percent, [dated(day0, -60000), dated(day0, -40000), dated(day0 + 365, 110000)]), usd(0))
+def dated_before_first() { cf.xnpv(ten_percent, [dated(day0, -100), dated(day0 - 1, 110)]) }
+t.check_throws("a flow dated before the first is rejected", dated_before_first, "first flow must be the earliest")
+def x_single_sign() { cf.xirr([dated(day0, -100), dated(day0 + 30, -50)]) }
+t.check_throws("single-sign dated flows have no XIRR", x_single_sign, "never change sign")
+def x_two_changes() { cf.xirr([dated(day0, -10000), dated(day0 + 365, 23000), dated(day0 + 730, -13200)]) }
+t.check_throws("two sign changes: unsupported, with a pointer to the escape-hatch doc", x_two_changes, "docs/ESCAPE-HATCHES.md")
+def x_malformed() { cf.xnpv(ten_percent, [{date: day0, amount: usd(-100)}]) }
+t.check_throws("a malformed dated flow is rejected", x_malformed, "must be {date_serial, amount}")
+def x_empty() { cf.xirr([]) }
+t.check_throws("no dated flows", x_empty, "non-empty list")
+
+# ---- 10. table_irr (pre-M5): the compact-table path agrees with the checked path ----
+let canonical_table = am.schedule_table(usd(20000000), monthly_65, 360, usd(126414), usd(0), [])
+# Different starting brackets end on different fractions inside the same
+# 1e-12 window, so agreement - not equality - is the property.
+t.check_true("table_irr: agrees with schedule_irr within 1e-12, good guess", rates_within(cf.table_irr(canonical_table, monthly_65), cf.schedule_irr(canonical), 12))
+t.check_true("table_irr: a far-off guess falls back to the full search (same root within 1e-12)", rates_within(cf.table_irr(canonical_table, rates.annual(500000)), cf.schedule_irr(canonical), 12))
+
+t.finish()

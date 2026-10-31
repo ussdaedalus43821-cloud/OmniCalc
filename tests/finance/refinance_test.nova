@@ -1,0 +1,60 @@
+# module: refinance
+# expect: 22
+#
+# Reference values from tests/finance/gen_refinance_vectors.py (fractions,
+# using the same schedules as gen_amortization_vectors.py). The canonical
+# scenario: 200,000.00 at 6.5%/12 with 360 months left and a 1,264.14
+# payment, refinanced to 5.0%/12 over 360 months with 6,000.00 closing costs.
+
+import "../../tools/check.nova" as t
+import "../../src/core/money.nova" as money
+import "../../src/core/rates.nova" as rates
+import "../../src/finance/amortization.nova" as am
+import "../../src/finance/refinance.nova" as refi
+
+def usd(minor) {
+    return money.make(minor, 2, "USD")
+}
+def monthly(micro) {
+    return rates.per_period(rates.annual(micro), 12)
+}
+
+let canonical = refi.compare(usd(20000000), monthly(65000), 360, usd(126414), monthly(50000), 360, usd(600000))
+t.check("canonical: new payment", canonical.new_payment, usd(107364))
+t.check("canonical: monthly savings", canonical.monthly_savings, usd(19050))
+t.check("canonical: breaks even", canonical.breaks_even, true)
+t.check("canonical: break-even month (6,000 / 190.50 = 31.5 -> 32)", canonical.break_even_month, 32)
+t.check("canonical: total savings", canonical.savings_over_remaining_term, usd(6257258))
+t.check("canonical: same terms, so lifetime savings equal total savings", canonical.lifetime_savings, usd(6257258))
+t.check("canonical: payoff periods", [canonical.payoff_period_current, canonical.payoff_period_new], [360, 360])
+t.check("canonical: totals paid", [canonical.current_total_paid, canonical.new_total_paid], [usd(45508582), usd(38651324)])
+
+# Five years into the canonical loan (balance after month 60), 300 months left,
+# refinanced to 4.5% over a fresh 360 months with 4,000.00 closing costs.
+let balance_60 = am.schedule(usd(20000000), monthly(65000), 360, usd(126414)).rows[59].balance
+t.check("5 years in: the balance after month 60", balance_60, usd(18722164))
+let extended = refi.compare(balance_60, monthly(65000), 300, usd(126414), monthly(45000), 360, usd(400000))
+t.check("5 years in: new payment and break-even month", [extended.new_payment, extended.break_even_month], [usd(94862), 13])
+t.check("5 years in: total savings over the shorter (300-month) schedule", extended.savings_over_remaining_term, usd(9065142))
+t.check("5 years in: lifetime savings count the 60 extra months", extended.lifetime_savings, usd(3373080))
+t.check("5 years in: payoff periods", [extended.payoff_period_current, extended.payoff_period_new], [300, 360])
+
+# 30 -> 15 years at a lower rate: a higher payment, but far less paid overall.
+let shorter = refi.compare(usd(20000000), monthly(65000), 360, usd(126414), monthly(50000), 180, usd(600000))
+t.check("30 -> 15: the payment goes up", shorter.monthly_savings, usd(-31745))
+t.check("30 -> 15: breaks even only after the new loan is paid off", shorter.break_even_month, 230)
+t.check("30 -> 15: total savings over the shorter schedule are negative", shorter.savings_over_remaining_term, usd(-6314028))
+t.check("30 -> 15: lifetime savings are large and positive", shorter.lifetime_savings, usd(16440034))
+
+let never = refi.compare(usd(20000000), monthly(65000), 360, usd(126414), monthly(64000), 360, usd(10000000))
+t.check("tiny saving, huge closing: never breaks even (month 0 means none)", [never.breaks_even, never.break_even_month], [false, 0])
+t.check("tiny saving, huge closing: lifetime loss", never.lifetime_savings, usd(-9527999))
+
+def higher_rate() { refi.compare(usd(20000000), monthly(65000), 360, usd(126414), monthly(70000), 360, usd(600000)) }
+t.check_throws("a higher rate and a higher payment is rejected", higher_rate, "saves nothing and never breaks even")
+def negative_closing() { refi.compare(usd(20000000), monthly(65000), 360, usd(126414), monthly(50000), 360, usd(-1)) }
+t.check_throws("negative closing costs are rejected", negative_closing, "must not be negative")
+def mixed_currency() { refi.compare(usd(20000000), monthly(65000), 360, usd(126414), monthly(50000), 360, money.make(600000, 2, "EUR")) }
+t.check_throws("mixed currencies are rejected", mixed_currency, "same currency and scale")
+
+t.finish()

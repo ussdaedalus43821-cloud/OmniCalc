@@ -1,0 +1,98 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 7 * * *"   # nightly --bootstrap run, 07:17 UTC
+  workflow_dispatch:
+    inputs:
+      update_baseline:
+        description: "Open a PR that replaces tools/perf_baseline.json with this run's perf results"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: NovaLang tests (direct)
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 tools/run_tests.py
+      - name: Host tests (headless bridge + CSV)
+        # unittest exits 5 when it finds no tests (Python 3.12+), so an empty
+        # or misnamed suite fails here instead of passing silently. Runners
+        # are slower and noisier than a workstation, so the 100 ms UI budget
+        # assertion gets 3x headroom in CI; locally it is the real 100 ms.
+        env:
+          OMNICALC_BUDGET_MS: "300"
+        run: python3 -m unittest discover -s tests/host -p "*_test.py" -t . -v
+
+  bootstrap:
+    name: NovaLang tests (--bootstrap, nightly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 tools/run_tests.py --bootstrap
+
+  performance:
+    name: Performance monitor (nightly gate; report-only on push)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # On push this only reports (a noisy shared runner must not block work);
+    # on the nightly schedule a >20% median regression fails the job - the alert.
+    continue-on-error: ${{ github.event_name == 'push' }}
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Time every screen's calculate path (median, p90)
+        run: python3 tools/perf.py --runs 20 --out perf-results.json
+      - name: Show the results (copy from here to set a baseline by hand)
+        if: always()
+        run: cat perf-results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-results
+          path: perf-results.json
+      - name: Open a PR that replaces the baseline
+        # Needs "Allow GitHub Actions to create and approve pull requests"
+        # (Settings > Actions > General) and the workflow on the default branch.
+        if: github.event_name == 'workflow_dispatch' && inputs.update_baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="perf-baseline-${{ github.run_id }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          cp perf-results.json tools/perf_baseline.json
+          git add tools/perf_baseline.json
+          git commit -m "Update performance baseline from run ${{ github.run_id }}"
+          git push origin "$branch"
+          gh pr create --title "Update performance baseline" --body "From workflow run ${{ github.run_id }} (ubuntu-latest, Python 3.12)." --base "${{ github.ref_name }}" --head "$branch"

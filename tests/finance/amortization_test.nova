@@ -1,0 +1,163 @@
+# module: amortization
+# expect: 53
+#
+# Reference values come from tests/finance/gen_amortization_vectors.py, a
+# separate Python (fractions.Fraction) implementation of the rules in
+# CLAUDE.md "Amortization rules". Re-run it to regenerate; it also writes
+# the full canonical schedule to tests/finance/vectors/mortgage_200k_6_5_360.json,
+# which section 1 diffs row by row. tools/run_tests.py runs from the
+# repository root, so that path is relative to the root.
+
+import "../../tools/check.nova" as t
+import "../../src/core/money.nova" as money
+import "../../src/core/rates.nova" as rates
+import "../../src/finance/tvm.nova" as tvm
+import "../../src/finance/amortization.nova" as am
+
+def usd(minor) {
+    return money.make(minor, 2, "USD")
+}
+
+let ZERO = usd(0)
+let monthly_65 = rates.per_period(rates.annual(65000), 12)
+let biweekly_65 = rates.per_period(rates.annual(65000), 26)
+let loan = usd(20000000)
+let payment = usd(126414)
+
+# Rows that break payment == regular + extra + adjustment == interest + principal.
+def broken_invariants(rows) {
+    let bad = {count: 0}
+    for row in rows {
+        let total = row.regular.minor + row.extra.minor + row.adjustment.minor
+        if row.payment.minor != total or row.payment.minor != row.interest.minor + row.principal.minor {
+            bad["count"] = bad.count + 1
+        }
+    }
+    return bad.count
+}
+
+def principal_repaid(rows) {
+    let sum_minor = {value: 0}
+    for row in rows {
+        sum_minor["value"] = sum_minor.value + row.principal.minor
+    }
+    return sum_minor.value
+}
+
+# ---- 1. canonical: 200,000.00 at 6.5%/12, 360 months, 1,264.14 ----
+t.check("the canonical payment is tvm.pmt, negated", money.negate(tvm.pmt(loan, ZERO, 360, monthly_65)), payment)
+let canonical = am.schedule(loan, monthly_65, 360, payment)
+let reference = json.loads(read("tests/finance/vectors/mortgage_200k_6_5_360.json"))
+t.check("canonical: row count matches the reference", len(canonical.rows), len(reference))
+let diff = {first: "none"}
+for i = 0 to len(reference) - 1 {
+    let want = reference[i]
+    let row = canonical.rows[i]
+    let got = [row.period, row.payment.minor, row.interest.minor, row.principal.minor, row.balance.minor]
+    if got != want and diff.first == "none" {
+        diff["first"] = "row " + str(i + 1) + ": expected " + str(want) + ", got " + str(got)
+    }
+}
+t.check("canonical: every row matches the reference", diff.first, "none")
+t.check("canonical: first period's interest", canonical.rows[0].interest, usd(108333))
+let last = canonical.rows[359]
+t.check("canonical: final row clears the balance", last.balance, ZERO)
+t.check("canonical: final row is marked final", last.kind, "final")
+t.check("canonical: final payment adjusted DOWN by 4.58", last.adjustment, usd(-458))
+t.check("canonical: final payment", last.payment, usd(125956))
+t.check("canonical: only the final row is adjusted", canonical.rows[358].adjustment, ZERO)
+t.check("canonical: totals", canonical.totals, {total_paid: usd(45508582), total_interest: usd(25508582), payoff_period: 360})
+t.check("canonical: row invariants hold", broken_invariants(canonical.rows), 0)
+t.check("canonical: principal repaid in full", principal_repaid(canonical.rows), 20000000)
+
+# ---- 2. 300,000.00 at 6.5%/12: the payment rounds DOWN, so the final one goes UP ----
+let big = am.schedule(usd(30000000), monthly_65, 360, money.negate(tvm.pmt(usd(30000000), ZERO, 360, monthly_65)))
+t.check("300k: payment is 1,896.20", big.rows[0].regular, usd(189620))
+t.check("300k: final payment adjusted UP by 4.71", big.rows[359].adjustment, usd(471))
+t.check("300k: final payment", big.rows[359].payment, usd(190091))
+t.check("300k: totals", big.totals, {total_paid: usd(68263671), total_interest: usd(38263671), payoff_period: 360})
+t.check("300k: row invariants hold", broken_invariants(big.rows), 0)
+
+# ---- 3. extra principal: payment // 12 = 105.34 every month ----
+let extra = am.schedule_with_extra(loan, monthly_65, 360, payment, usd(10534), [])
+t.check("extra: pays off at month 290", extra.totals.payoff_period, 290)
+t.check("extra: final row", extra.rows[289], {period: 290, payment: usd(113883), interest: usd(614), principal: usd(113269), balance: ZERO, regular: payment, extra: usd(10534), adjustment: usd(-23065), kind: "final"})
+t.check("extra: total interest", extra.totals.total_interest, usd(19691855))
+t.check("extra: row invariants hold", broken_invariants(extra.rows), 0)
+
+# ---- 4. lump sums: 10,000.00 at months 12 and 60 ----
+let lumped = am.schedule_with_extra(loan, monthly_65, 360, payment, ZERO, [{period: 12, amount: usd(1000000)}, {period: 60, amount: usd(1000000)}])
+t.check("lumps: row 12", lumped.rows[11], {period: 12, payment: usd(1126414), interest: usd(107226), principal: usd(1019188), balance: usd(18776450), regular: payment, extra: usd(1000000), adjustment: ZERO, kind: "regular"})
+t.check("lumps: pays off at month 286", lumped.totals.payoff_period, 286)
+t.check("lumps: total interest", lumped.totals.total_interest, usd(18060517))
+let halved_lumps = am.schedule_with_extra(loan, monthly_65, 360, payment, ZERO, [{period: 12, amount: usd(500000)}, {period: 12, amount: usd(500000)}, {period: 60, amount: usd(1000000)}])
+t.check("lumps: two in one period add up", halved_lumps.totals, lumped.totals)
+
+# ---- 5. biweekly: 6.5%/26 per period, half of 1,264.14 ----
+let biweekly = am.schedule_biweekly(loan, biweekly_65, 360, payment)
+t.check("biweekly: half payment", biweekly.rows[0].regular, usd(63207))
+# Keep this odd-payment case: 126,414 is even, so halving it never rounds,
+# and a mutation that floored the half instead of rounding it half-up went
+# undetected until this check was added (M2). Don't "simplify" it away.
+t.check("biweekly: an odd payment's half rounds half-up", am.schedule_biweekly(loan, biweekly_65, 360, usd(126415)).rows[0].regular, usd(63208))
+t.check("biweekly: pays off at period 628", biweekly.totals.payoff_period, 628)
+t.check("biweekly: total interest", biweekly.totals.total_interest, usd(19633936))
+t.check_true("biweekly: pays off in 24-25 years (628 / 26 = 24.15)", biweekly.totals.payoff_period >= 24 * 26 and biweekly.totals.payoff_period < 25 * 26)
+t.check_true("biweekly: less total interest than monthly", money.compare(biweekly.totals.total_interest, canonical.totals.total_interest) < 0)
+t.check_true("biweekly vs monthly + 1/12 extra: payoff within 3 months", abs(biweekly.totals.payoff_period * 12 - extra.totals.payoff_period * 26) < 3 * 26)
+t.check("biweekly vs monthly + 1/12 extra: not the same schedule", biweekly.totals.total_interest == extra.totals.total_interest, false)
+t.check("biweekly: row invariants hold", broken_invariants(biweekly.rows), 0)
+let one_month = am.schedule_biweekly(usd(100000), rates.annual(0), 1, usd(2000))
+t.check("biweekly: 1 month allows ceil(26/12) = 3 periods", one_month.totals.payoff_period, 3)
+t.check("biweekly: the capped final period pays the rest", one_month.rows[2].payment, usd(98000))
+
+# ---- 6. zero rate ----
+t.check("zero rate: totals", am.schedule(usd(120000), rates.annual(0), 12, usd(10000)).totals, {total_paid: usd(120000), total_interest: ZERO, payoff_period: 12})
+
+# ---- 7. rejected inputs ----
+def negative_principal() { am.schedule(usd(-100), monthly_65, 360, payment) }
+t.check_throws("negative principal", negative_principal, "principal must be positive")
+def zero_principal() { am.schedule(ZERO, monthly_65, 360, payment) }
+t.check_throws("zero principal", zero_principal, "principal must be positive")
+def no_periods() { am.schedule(loan, monthly_65, 0, payment) }
+t.check_throws("n = 0", no_periods, "n must be at least 1")
+def interest_only() { am.schedule(loan, monthly_65, 360, usd(108333)) }
+t.check_throws("payment equal to the interest: negative amortization", interest_only, "negative amortization")
+def below_interest() { am.schedule(loan, monthly_65, 360, usd(100000)) }
+t.check_throws("payment below the interest: negative amortization", below_interest, "negative amortization")
+def signed_payment() { am.schedule(loan, monthly_65, 360, usd(-126414)) }
+t.check_throws("a TVM-signed (negative) payment", signed_payment, "payment must be positive")
+def negative_extra() { am.schedule_with_extra(loan, monthly_65, 360, payment, usd(-1), []) }
+t.check_throws("negative extra principal", negative_extra, "must not be negative")
+def lump_out_of_range() { am.schedule_with_extra(loan, monthly_65, 360, payment, ZERO, [{period: 361, amount: usd(100)}]) }
+t.check_throws("lump sum after period n", lump_out_of_range, "lump sum period must be 1-360")
+def lump_zero() { am.schedule_with_extra(loan, monthly_65, 360, payment, ZERO, [{period: 5, amount: ZERO}]) }
+t.check_throws("zero lump sum", lump_zero, "lump sum amount must be positive")
+def lump_shape() { am.schedule_with_extra(loan, monthly_65, 360, payment, ZERO, [{when: 5, amount: usd(100)}]) }
+t.check_throws("malformed lump sum", lump_shape, "must be {period, amount}")
+def mixed_currency() { am.schedule(loan, monthly_65, 360, money.make(126414, 2, "EUR")) }
+t.check_throws("mixed currencies", mixed_currency, "same currency and scale")
+def biweekly_no_months() { am.schedule_biweekly(loan, biweekly_65, 0, payment) }
+t.check_throws("biweekly with 0 months", biweekly_no_months, "n must be at least 1")
+
+# ---- 8. the unchecked core's compact table (pre-M5) agrees with the money rows ----
+def table_matches(table, schedule) {
+    let bad = {count: 0}
+    for i = 0 to len(schedule.rows) - 1 {
+        let row = schedule.rows[i]
+        let want = [row.period, row.payment.minor, row.interest.minor, row.principal.minor, row.balance.minor, row.regular.minor, row.extra.minor, row.adjustment.minor]
+        if table.rows[i] != want {
+            bad["count"] = bad.count + 1
+        }
+    }
+    return bad.count
+}
+let canonical_table = am.schedule_table(loan, monthly_65, 360, payment, ZERO, [])
+t.check("schedule_table: same rows as schedule (canonical)", table_matches(canonical_table, canonical), 0)
+t.check("schedule_table: same totals", [canonical_table.total_paid, canonical_table.total_interest, canonical_table.payoff_period, canonical_table.principal], [45508582, 25508582, 360, 20000000])
+let lumped_table = am.schedule_table(loan, monthly_65, 360, payment, ZERO, [{period: 12, amount: usd(1000000)}, {period: 60, amount: usd(1000000)}])
+t.check("schedule_table: same rows as schedule_with_extra (lump sums)", [table_matches(lumped_table, lumped), len(lumped_table.rows)], [0, 286])
+def table_negative_amortization() { am.schedule_table(loan, monthly_65, 360, usd(100000), ZERO, []) }
+t.check_throws("schedule_table: checks its inputs like schedule_with_extra", table_negative_amortization, "negative amortization")
+
+t.finish()

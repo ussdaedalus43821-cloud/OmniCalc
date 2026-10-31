@@ -1,0 +1,158 @@
+# src/core/money.nova - money as integer minor units.
+#
+# A money value is {minor, scale, currency}: minor is a whole number of the
+# currency's smallest unit (scale 2 means cents: {minor: 1999, scale: 2,
+# currency: "USD"} is 19.99 USD). Two values combine only if their scale and
+# currency match; nothing here converts between them. The host's only
+# formatting job is minor + scale + currency -> string.
+#
+# NovaLang has one `number` type covering ints and floats
+# (Nova_Lang/novalang.py:418-431). A fractional, NaN or infinite value is
+# rejected (src/core/numbers.nova); a whole-valued float is normalized to an
+# int with floor(). Only + - * // %
+# are used, never `/`, which returns a float for inexact division
+# (Nova_Lang/novalang.py:3258-3265).
+#
+# Rounding happens only in round_half_up(). multiply_rate_exact() is the
+# unrounded product, for solvers and any arithmetic that continues;
+# multiply_rate() rounds it once, for a single cash flow.
+
+import "./numbers.nova" as numbers
+import "./rates.nova" as rates
+
+def require_whole(value, what) {
+    return numbers.require_whole(value, what, "money")
+}
+
+def describe(value) {
+    return str(value.minor) + "@" + str(value.scale) + " " + value.currency
+}
+
+def require_money(value) {
+    if type(value) != "dict" or not ("minor" in value) or not ("scale" in value) or not ("currency" in value) {
+        throw("money: expected {minor, scale, currency}, got " + str(value))
+    }
+    return value
+}
+
+def require_same_unit(a, b, operation) {
+    require_money(a)
+    require_money(b)
+    if a.scale != b.scale or a.currency != b.currency {
+        throw("money: " + operation + " needs the same currency and scale, got " + describe(a) + " and " + describe(b))
+    }
+}
+
+def with_minor(template, minor) {
+    return {minor: minor, scale: template.scale, currency: template.currency}
+}
+
+# Throws unless a and b are money values with the same scale and currency.
+export def check_same_unit(a, b) {
+    require_same_unit(a, b, "check_same_unit")
+    return true
+}
+
+export def make(minor, scale, currency) {
+    let whole_scale = require_whole(scale, "scale")
+    if whole_scale < 0 {
+        throw("money: scale must not be negative, got " + str(scale))
+    }
+    if type(currency) != "string" or len(currency) == 0 {
+        throw("money: currency must be a non-empty string, got " + str(currency))
+    }
+    return {minor: require_whole(minor, "minor"), scale: whole_scale, currency: currency}
+}
+
+export def add(a, b) {
+    require_same_unit(a, b, "add")
+    return with_minor(a, a.minor + b.minor)
+}
+
+export def subtract(a, b) {
+    require_same_unit(a, b, "subtract")
+    return with_minor(a, a.minor - b.minor)
+}
+
+export def negate(a) {
+    require_money(a)
+    return with_minor(a, 0 - a.minor)
+}
+
+export def multiply_int(a, factor) {
+    require_money(a)
+    return with_minor(a, a.minor * require_whole(factor, "factor"))
+}
+
+export def compare(a, b) {
+    require_same_unit(a, b, "compare")
+    if a.minor < b.minor {
+        return -1
+    }
+    if a.minor > b.minor {
+        return 1
+    }
+    return 0
+}
+
+# numerator / denominator rounded to a whole number, with halves rounded
+# away from zero (2.5 -> 3, -2.5 -> -3), the convention of Python's
+# decimal.ROUND_HALF_UP. Exact integer arithmetic; no floats.
+export def round_half_up(numerator, denominator) {
+    let n = require_whole(numerator, "numerator")
+    let d = require_whole(denominator, "denominator")
+    if d == 0 {
+        throw("money: round_half_up denominator must not be zero")
+    }
+    return round_half_up_whole(n, d)
+}
+
+# The same rounding with no input checks, for hot loops (amortization) whose
+# operands are ints already validated upstream. numerator and denominator
+# MUST be ints and denominator non-zero. This is the one place the rounding
+# rule is written; round_half_up() delegates here.
+export def round_half_up_whole(numerator, denominator) {
+    let n = numerator
+    let d = denominator
+    if d < 0 {
+        n = 0 - n
+        d = 0 - d
+    }
+    if n >= 0 {
+        return (2 * n + d) // (2 * d)
+    }
+    return 0 - ((2 * (0 - n) + d) // (2 * d))
+}
+
+# numerator / denominator rounded UP (toward +infinity) to a whole number.
+# The one deliberate exception to half-up rounding (CLAUDE.md "Number
+# rules"): goal-seeking. A solved savings contribution must REACH the goal,
+# so it rounds up; half-up could land a cent short. Use nowhere else.
+export def round_ceiling(numerator, denominator) {
+    let n = require_whole(numerator, "numerator")
+    let d = require_whole(denominator, "denominator")
+    if d == 0 {
+        throw("money: round_ceiling denominator must not be zero")
+    }
+    if d < 0 {
+        n = 0 - n
+        d = 0 - d
+    }
+    return 0 - ((0 - n) // d)
+}
+
+# a * rate with no rounding: {num, den, scale, currency}, meaning num / den
+# minor units. Both operands are integers, so this is exact. Solvers
+# evaluate residuals in this form, never in rounded minor units.
+export def multiply_rate_exact(a, rate) {
+    require_money(a)
+    rates.check_rate(rate)
+    return {num: a.minor * rate.num, den: rate.den * rates.MICRO, scale: a.scale, currency: a.currency}
+}
+
+# multiply_rate_exact() rounded half-up once, for one cash flow (e.g. one
+# period's interest). Never feed its result into a solver's residual.
+export def multiply_rate(a, rate) {
+    let exact = multiply_rate_exact(a, rate)
+    return with_minor(a, round_half_up(exact.num, exact.den))
+}
