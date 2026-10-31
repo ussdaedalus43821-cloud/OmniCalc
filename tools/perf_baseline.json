@@ -1,0 +1,31 @@
+{
+  "source": "GitHub Actions run 41235056992 (push of ee8c6d0), ubuntu-latest, job 'Performance monitor', copied verbatim from its log",
+  "python": "3.12.15",
+  "machine": "x86_64",
+  "screens": {
+    "amortization": {
+      "median_ms": 25.63,
+      "p90_ms": 28.19,
+      "max_ms": 42.15,
+      "runs": 20
+    },
+    "savings": {
+      "median_ms": 9.41,
+      "p90_ms": 12.74,
+      "max_ms": 15.54,
+      "runs": 20
+    },
+    "refinance": {
+      "median_ms": 37.16,
+      "p90_ms": 37.71,
+      "max_ms": 38.14,
+      "runs": 20
+    },
+    "debt_payoff": {
+      "median_ms": 8.74,
+      "p90_ms": 8.92,
+      "max_ms": 8.97,
+      "runs": 20
+    }
+  }
+}

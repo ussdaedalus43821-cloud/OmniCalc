@@ -78,7 +78,13 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
 - **No auto-calculate.** A tab recalculates only on **Calculate** (or Enter). Editing any input marks
   its results **stale** ("Inputs changed - press Calculate…") until then.
 - A screen is one entry in `app.SCREENS`: its façade file, its input fields (as `calculate()` takes
-  them), and its summary items with a display kind (`money`, `count`, `percent`, `text`). The table
+  them), and its summary items with a display kind (`money`, `count`, `percent`, `text`,
+  `phrase`).
+  - Field kinds: a text entry (the default), a **choice** (a read-only drop-down whose *value*
+    goes to the façade), and **rows** (an editable list with Add row / Remove last row, which
+    goes to the façade as a list of lists of strings).
+  - A **phrase** is `{before, amount, after}`: the façade decides how a number reads ("saves X" /
+    "costs X MORE"), and the host only formats the amount. The table
   and CSV come from the façade's `columns`, `column_kinds` and `rows`, so one exporter serves every
   screen.
 - Each screen gets **its own NovaLang engine**, because every façade exports `calculate`. Startup
@@ -92,9 +98,14 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
 - **Evidence from M5 (N = 3):** the host side generalized with **no change to the contract**,
   except adding `column_kinds`. One `SCREENS` loop, one exporter, one CLI dispatcher, one bridge
   test, and the arithmetic guard passed unchanged.
-- **What's duplicated in NovaLang:** the `amount()` / rate-parsing helpers and the
-  `CURRENCY`/`SCALE` constants are copied in all three façades. That's the extraction candidate
-  (a shared `src/app/inputs.nova`). Decide at the start of M6, not mid-screen.
+- **Extracted in M6:** `src/app/parse_helpers.nova` (`amount`, `annual_rate_micro`,
+  `monthly_rate`, `count` and the `CURRENCY`/`SCALE` constants), with
+  `tests/app/parse_helpers_test.nova` pinning every edge case.
+  - **Drift found before extracting:** the amortization façade's `amount()` accepted negative
+    amounts, leaving `amortization.nova` to reject them later with a different message. Every
+    façade now rejects them at parse time.
+  - Whether a negative *rate* is allowed is a domain choice, so it's a parameter
+    (`allow_negative`), not a copy. Savings allows rates above −100%; loans don't.
 
 ## Host / NovaLang boundary
 | Python host owns | NovaLang owns |
@@ -264,7 +275,16 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
 - **References:** Microsoft's XNPV/XIRR example (XNPV(9%) = 2,086.65, XIRR 0.373362535,
   where Excel is only good to 1e-8) and `tests/finance/gen_xcashflow_vectors.py` (50 digits).
 
-## Savings convention (`src/app/savings_screen.nova`, M5)
+## Savings convention (`src/app/savings_screen.nova`, M5; solve-for in M6)
+- **Solve for any variable.** `mode` selects what to solve for:
+  - `fv`: the final balance;
+  - `pmt`: the monthly contribution needed to reach a target in N years;
+  - `n`: the time to reach a target. This is `tvm.n`'s `periods`, the first whole month the
+    balance reaches the target. The last row stops at that month.
+  Inputs a mode doesn't use are ignored.
+- A solved contribution is rounded **half-up** like every payment, so the final balance can land
+  a few cents either side of the target. $1,000,000 in 30 years at 7% needs $753.16, which lands at
+  $999,998.33. The screen shows the actual final balance.
 - Contributions are made at the **end of each month** (an ordinary annuity), matching the loan
   payment convention. **Start-of-month is deliberately not offered in v1.**
 - Monthly rate = annual / 12, kept exact. Each year's balance is `tvm.fv`, rounded half-up to the
@@ -281,14 +301,39 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
 - **Break-even** = the smallest month k ≥ 1 where the cumulative saving ≥ the closing costs.
   NovaLang has no null, so the result carries `breaks_even: bool` and `break_even_month` (0 when
   it never breaks even).
-- **`total_savings`** (as briefed) sums the savings over the **shorter** schedule, minus the
-  closing costs. **`lifetime_savings`** = current total paid − (new total paid + closing). When the
-  terms differ the two disagree, sometimes in sign:
-  - 30 → 15 years: `total_savings` −$63,140, `lifetime_savings` +$164,400;
+- **`lifetime_savings` is the headline**: current total paid − (new total paid + closing). "Should I
+  refinance?" is a question about total dollars over the loans' lives. The façade returns it as a
+  phrase, "saves X over both loans' lives" or "costs X MORE than keeping the current loan", so a
+  loss can never read as a saving.
+- **`savings_over_remaining_term`** (renamed in M6 from `total_savings`, which was misleading) sums
+  the savings over the **shorter** schedule, minus closing costs. It's a secondary sanity check,
+  labelled "Net over the shorter term only". When the terms differ it can disagree with lifetime,
+  even in sign:
+  - 30 → 15 years: −$63,140.28 vs a lifetime saving of +$164,400.34;
   - a fresh 30-year five years in: +$90,651 vs +$33,731.
-  The screen shows both.
 - **Throws** when the new rate is not lower **and** the new payment is not lower: nothing is saved,
   so there's no break-even.
+
+## Debt payoff convention (`src/finance/debt_payoff.nova`, M6)
+- A debt is `{name, balance, rate, minimum_payment}`: positive money, and a rate **per month** above
+  −100%. `monthly_budget` must cover the sum of the minimums **and** exceed the first month's
+  total interest. The plan must finish within 1,200 months.
+- **Each month:**
+  1. every open debt accrues interest (balance × rate, rounded half-up);
+  2. every open debt gets its minimum, or its balance if that's smaller;
+  3. **all** the rest of the budget goes to the first open debt in strategy order, cascading to
+     the next one in the same month when a debt clears.
+- **Rollover:** the whole budget is paid every month but the last, so a paid-off debt's minimum
+  rolls into the target. That is what makes snowball and avalanche differ.
+- **Order is fixed at the start:**
+  - snowball = balance ascending;
+  - avalanche = rate descending;
+  - ties keep the input order.
+  With equal rates the orders differ but total interest doesn't. A test pins $3,643.60 both ways.
+  On realistic debts avalanche wins; a test pins a gap of $485.47.
+- **Cost** is debts × months, about 45 µs per debt-month per strategy, and the screen runs both
+  strategies. Inlining the rounding was measured and gained nothing beyond noise, so it calls the
+  one rounding rule.
 
 ## Amortization rules (`src/finance/amortization.nova`)
 - **Magnitudes, not signed cash flows.** Principal, payment, extra and lump sums are positive
@@ -376,6 +421,8 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
 - src/finance/cashflow.nova — NPV, IRR, payback, from_schedule (M3)
 - src/finance/amortization.nova — schedules, extra payments, biweekly (M2); schedule_table (pre-M5)
 - src/finance/refinance.nova — keep vs refinance comparison (M5)
+- src/finance/debt_payoff.nova — snowball / avalanche plans (M6)
+- src/app/parse_helpers.nova — shared façade input parsing (M6)
 - src/finance/investments — compound interest (v1); CAGR, DCA, retirement (later)
 - src/finance/business — margin, break-even, ROI, depreciation (post-v1)
 - src/app — NovaLang screen façades (one per screen; all the screen's math)
@@ -441,8 +488,18 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
     - the host tests, now covering all three screens.
   - Nightly performance monitor: `tools/perf.py` plus a CI job that uploads `perf-results.json`
     and fails only the nightly job on a >20% median regression vs `tools/perf_baseline.json`.
-  - Not in M5: debt payoff (snowball/avalanche), which comes in M6.
-- **M6 — debt payoff, plus the two planned escape hatches** (`docs/ESCAPE-HATCHES.md`).
+- **M5** ✅ done, reviewed.
+- **M6 — debt payoff and gap-fills.** 🚧 in progress, awaiting review.
+  - Gap-fills:
+    - savings solve-for (FV / PMT / N);
+    - `total_savings` → `savings_over_remaining_term`, with lifetime as the headline;
+    - `parse_helpers.nova` extracted;
+    - refinance p90 measured: 66–73 ms over four 100-press runs, under 80, so not optimized;
+    - the CI perf baseline committed.
+  - `src/finance/debt_payoff.nova` and `src/app/debt_payoff_screen.nova` (a fourth tab).
+  - The two planned escape hatches moved to M7 or later; neither is needed by these screens.
+- **M7 — decide after using the app:** investments (portfolio, CAGR, dividends) or the
+  ordinary math engine (scientific, units, date math).
 - **Later — compound interest** (`investments`).
 - **Later — Scientific + units** (`core/math`).
 - **Later — the full Tkinter host:** screens with formula/assumptions, CSV export, a terminal debug
@@ -450,3 +507,9 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
 - **CI** (`.github/workflows/tests.yml`):
   - on every push and PR: `tools/run_tests.py` and the host `unittest` suite;
   - nightly (cron, 07:17 UTC): the `--bootstrap` job and the performance monitor.
+  - **Performance baseline:** `tools/perf_baseline.json` comes from a CI run's log, never from a
+    dev machine; this container runs about 40% slower and trips every alert. The perf job also
+    runs on push, but only reports there (`continue-on-error`). To re-baseline, run the workflow
+    with `update_baseline: true`, which opens a PR. That needs the workflow on the default branch
+    and "Allow GitHub Actions to create and approve pull requests" enabled; otherwise, copy the
+    JSON from the job log.

@@ -35,7 +35,7 @@ Each is tracked here so it isn't forgotten. None is built yet, and none has a pa
 - **Reason:** the NovaLang Budan search costs O(K²) per root count. Measured: 120 ms at 30
   periods and 271 ms at 60. It refuses more than 60 periods, with an error that points here.
   Real cases (options, private equity, irregular working capital) are rare.
-- **Status:** not built. **Target: M6.**
+- **Status:** not built. **Target: M7 or later.** Moved from M6 because neither debt payoff nor any current screen needs it.
 - **Date added:** 2026-10-31.
 
 ### XIRR with more than one sign change
@@ -47,7 +47,7 @@ Each is tracked here so it isn't forgotten. None is built yet, and none has a pa
 - **Reason:** Budan's theorem needs a polynomial of manageable degree. With dated flows the
   exponents are day counts, so the degree is the number of days (thousands). A 5 bp grid of
   float XNPV evaluations would cost seconds in NovaLang.
-- **Status:** not built. **Target: M6.**
+- **Status:** not built. **Target: M7 or later.** Moved from M6 because neither debt payoff nor any current screen needs it.
 - **Date added:** 2026-10-31.
 
 ## Decisions to keep in NovaLang (no escape hatch)
@@ -166,6 +166,31 @@ These were checked against the budget and stay in NovaLang. Re-measure if inputs
 - Every median is under the 70 ms M5 target, so no new unchecked core was needed. Refinance is the
   most expensive handler and the closest to the target. If it grows, the next lever is that
   `compare` only needs each schedule's payment column, not the full table.
+
+### M6: refinance p90, debt payoff, and the CI baseline (2026-10-31)
+- **Refinance p90**, GUI, 100 presses including drawing, four runs:
+
+  | Run | p50 | p90 | p99 | max |
+  |---|---|---|---|---|
+  | 1 | 58.8 | 65.9 | 71.7 | 78.7 |
+  | 2 | 60.1 | 70.7 | 107.3 | 108.7 |
+  | 3 | 60.4 | 73.1 | 99.6 | 104.4 |
+  | 4 | 61.0 | 69.7 | 102.0 | 130.5 |
+
+  p90 is under the 80 ms threshold, so it's **not optimized**. The ~100+ ms outliers are p99-only
+  noise. One 20-press run read p90 105, which shows 20 samples is too few for a p90. The suspected
+  hotspot doesn't exist: `lifetime_savings` reuses the two schedules already built.
+- **Debt payoff** (both strategies, 3 debts):
+  - headless median 15.6 ms;
+  - GUI p50/p90/p99 = 15.7 / 17.0 / 19.6 ms;
+  - CI median 8.7 ms.
+  Cost is about 45 µs per debt-month per strategy. The 10-debt, 166-month stress case is about
+  70–80 ms per strategy, so the screen (which runs both) would be about 150 ms. That's over budget,
+  but well beyond a household debt list. If it matters, the next lever is skipping paid-off debts
+  in the inner loop.
+- **CI baseline** (`tools/perf_baseline.json`, from run 41235056992): medians of 25.6 / 9.4 /
+  37.2 / 8.7 ms for amortization / savings / refinance / debt payoff. CI runners are about 40%
+  faster than this container.
 
 ## Known approximations
 

@@ -68,3 +68,9 @@ Filed as https://github.com/ussdaedalus43821-cloud/Nova_Lang/issues/4. OmniCalc'
 No new upstream findings. Two reminders that cost a rename each: `split` is a built-in, so it can't
 be a variable name, and neither can `values`. Both are already covered by the `CLAUDE.md` rule on
 reserved names.
+
+## M6
+No new upstream issues. One useful verified behavior: a `def` nested inside a function can read the
+enclosing function's locals (a closure). `debt_payoff.nova` uses it to pass comparators to its
+stable sort. It's not mentioned in `Nova_Lang/README.md`, and it worked under both the direct and
+`--bootstrap` interpreters.
