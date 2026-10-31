@@ -1,0 +1,89 @@
+# src/app/math_screen.nova - the Math tab: an expression evaluator and a unit
+# converter, behind one call for the Python host (same contract as the other
+# facades: text as typed in; text, ints and lists out - the host does no maths).
+#
+# calculate(expression, angle, value, from_unit, to_unit, units_data):
+#   expression  evaluated by src/math/scientific.nova (blank: skipped)
+#   angle       "rad" or "deg"
+#   value, from_unit, to_unit   converted by src/math/units.nova (blank value:
+#               skipped); the table shows the value in every unit of its
+#               category
+#   units_data  the parsed src/math/units.json - the host reads and decodes the
+#               file (file I/O is the host's, and `json` is undefined inside
+#               NovaLang modules); units.load memoizes it
+# Each section reports its own error as text instead of throwing, so a typo
+# in the expression does not hide a valid conversion.
+
+import "../math/scientific.nova" as sci
+import "../math/units.nova" as units
+
+let DIGITS = 12
+let BLANK = "—"
+
+let ASSUMPTIONS = [
+    "Exact whenever possible: 0.1 + 0.2 is exactly 0.3, 1/3 stays a fraction; sin, ln, sqrt(2) and other irrationals are floats.",
+    "-2^2 = -4 (powers bind tighter than minus); ^ is right-associative; write * explicitly (2*pi, not 2pi).",
+    "Results show 12 significant figures, in scientific notation at 10^12 and above or below 10^-6.",
+    "Unit factors are exact by definition (international inch and pound, US gallon = 231 in^3); temperatures convert with offsets."
+]
+
+def message_of(problem) {
+    return str(problem)
+}
+
+def evaluate_section(expression, angle) {
+    if trim(expression) == "" {
+        return {result: BLANK, exact: ""}
+    }
+    let out = {result: "", exact: ""}
+    try {
+        let r = sci.evaluate(expression, {angle: angle})
+        out["result"] = r.display
+        out["exact"] = r.exact_text
+    } catch problem {
+        out["result"] = "error: " + message_of(problem)
+    }
+    return out
+}
+
+def convert_section(table, value, from_unit, to_unit) {
+    if trim(value) == "" {
+        return {converted: BLANK, rows: []}
+    }
+    let out = {converted: "", rows: []}
+    try {
+        let r = units.convert_text(table, value, trim(from_unit), trim(to_unit))
+        let target = units.find(table, trim(to_unit))
+        out["converted"] = r.display + " " + target.symbol
+        let source = units.find(table, trim(from_unit))
+        for symbol in units.units_in(table, source.category) {
+            let unit = units.find(table, symbol)
+            let each = units.convert_text(table, value, source.symbol, symbol)
+            append(out.rows, [symbol, unit.name, each.display, each.exact_text])
+        }
+    } catch problem {
+        out["converted"] = "error: " + message_of(problem)
+        out["rows"] = []
+    }
+    return out
+}
+
+export def calculate(expression, angle, value, from_unit, to_unit, units_data) {
+    if angle != "rad" and angle != "deg" {
+        throw("parse: angle must be rad or deg")
+    }
+    let table = units.load(units_data)
+    let math = evaluate_section(expression, angle)
+    let conversion = convert_section(table, value, from_unit, to_unit)
+    return {
+        currency: "",
+        scale: 0,
+        result: math.result,
+        exact: math.exact,
+        converted: conversion.converted,
+        columns: ["unit", "name", "value", "exact"],
+        column_kinds: ["text", "text", "text", "text"],
+        rows: conversion.rows,
+        assumptions: ASSUMPTIONS
+    }
+}

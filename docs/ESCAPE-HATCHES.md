@@ -260,6 +260,13 @@ rediscovers them.
   globals of the top-level script only. A module function can call built-ins like `sqrt`, but
   `PI` is "undefined name". `scientific.nova` defines `MATH_PI = 3.141592653589793` and
   `MATH_E = 2.718281828459045`, verified bit-identical to the built-ins.
+- **`json` doesn't exist inside imported modules either**, the same as `PI` and `E` (found
+  while implementing `units.nova`). So `units.load` takes the *parsed* table, and the host (or a
+  top-level script) does `json.load`/`json.loads`. Decoding sits with file I/O on the host side of
+  the boundary.
+- **Units cost:** the first load validates 84 units in 22 ms and is memoized; a press is about
+  1.5 ms. The **Math tab** takes 12.5 ms median through the bridge, and 23.9 ms in the GUI
+  including drawing.
 - **Evaluator cost** (measured after implementation; unchecked core not needed):
   - typical expressions take 2–4 ms;
   - `1000!` takes 3.4 ms and `2^4096` 1.2 ms;

@@ -1,0 +1,77 @@
+# module: units
+# expect: 53
+#
+# (json is only available at top level, so this file parses the table and
+# passes the data to units.load - as the host does.)
+#
+# Every case in tests/math/vectors/units.json (tests/math/gen_math_vectors.py,
+# which re-derives each factor from its definition instead of reading
+# src/math/units.json), checked EXACTLY: num/den, display and exact_text -
+# so "1 psi -> Pa" must be the fraction 8896443230521/1290320000, not a float
+# that rounds to the right display. Plus the table's own validation.
+
+import "../../tools/check.nova" as t
+import "../../src/math/units.nova" as units
+
+let table_data = json.loads(read("src/math/units.json"))
+let table = units.load(table_data)
+let vectors = json.loads(read("tests/math/vectors/units.json"))
+
+def label_of(c) {
+    return c.value + " " + c.from + " -> " + c.to
+}
+
+for c in vectors.cases {
+    let outcome = {got: {}, error: ""}
+    try {
+        outcome["got"] = units.convert_text(table, c.value, c.from, c.to)
+    } catch problem {
+        outcome["error"] = str(problem)
+    }
+    if outcome.error != "" {
+        t.check(label_of(c), "threw: " + outcome.error, "an exact result")
+    } else {
+        let got = outcome.got
+        if got.value.kind != "exact" {
+            # A float that merely displays correctly is still a failure:
+            # the exact-first rule applies to units too.
+            t.check(label_of(c), "a " + got.value.kind + " result displaying " + got.display, "an exact result")
+        } else {
+            t.check(label_of(c), [got.value.kind, got.value.num, got.value.den, got.display, got.exact_text], ["exact", c.num, c.den, c.display, c.exact_text])
+        }
+    }
+}
+for c in vectors.errors {
+    def attempt() { units.convert_text(table, c.value, c.from, c.to) }
+    t.check_throws(label_of(c), attempt, c.error)
+}
+
+# ---- suggestions, lookup, lists
+def fts() { units.find(table, "fts") }
+t.check_throws("a typo suggests the unit it starts with", fts, "did you mean \"ft\"?")
+def upper_mm() { units.find(table, "MM") }
+t.check_throws("a case slip suggests the right case", upper_mm, "did you mean \"mm\"?")
+t.check("aliases resolve to the unit", units.find(table, "feet").symbol, "ft")
+t.check("b is a bit, B is a byte", [units.find(table, "b").symbol, units.find(table, "B").symbol], ["bit", "B"])
+t.check("units_in keeps table order", units.units_in(table, "temperature"), ["K", "degC", "degF", "degR"])
+t.check("11 categories", len(units.categories(table)), 11)
+t.check("a value may be an expression (the host passes text as typed)", units.convert_text(table, "3*12", "in", "ft").display, "3")
+t.check("a float value stays a float (pi metres)", units.convert_text(table, "pi", "m", "cm").value.kind, "float")
+t.check("load is memoized", units.load(table_data) == table, true)
+
+# ---- the table's own validation
+def bad(text) {
+    return json.loads("{\"categories\": {\"length\": \"m\", \"mass\": \"kg\"}, \"units\": [" + text + "]}")
+}
+def duplicate() { units.load(bad("{\"symbol\": \"m\", \"name\": \"a\", \"category\": \"length\", \"factor\": \"1\"}, {\"symbol\": \"x\", \"name\": \"b\", \"category\": \"length\", \"factor\": \"2\", \"aliases\": [\"m\"]}")) }
+t.check_throws("a duplicated symbol or alias is rejected", duplicate, "\"m\" is listed twice")
+def unknown_category() { units.load(bad("{\"symbol\": \"m\", \"name\": \"a\", \"category\": \"speed\", \"factor\": \"1\"}")) }
+t.check_throws("an unknown category is rejected", unknown_category, "unknown category \"speed\"")
+def bad_factor() { units.load(bad("{\"symbol\": \"m\", \"name\": \"a\", \"category\": \"length\", \"factor\": \"0.3048.1\"}")) }
+t.check_throws("a malformed factor is rejected", bad_factor, "is not a number")
+def zero_factor() { units.load(bad("{\"symbol\": \"m\", \"name\": \"a\", \"category\": \"length\", \"factor\": \"0\"}")) }
+t.check_throws("a zero factor is rejected", zero_factor, "factor must be positive")
+def stray_offset() { units.load(bad("{\"symbol\": \"m\", \"name\": \"a\", \"category\": \"length\", \"factor\": \"1\", \"offset\": \"2\"}")) }
+t.check_throws("an offset outside temperature is rejected", stray_offset, "only temperature units may have an offset")
+
+t.finish()

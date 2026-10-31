@@ -138,7 +138,27 @@
    "den": 1,
    "display": "-40",
    "exact_text": "",
-   "note": "where the scales meet"
+   "note": "where the scales meet: C -> F"
+  },
+  {
+   "value": "-40",
+   "from": "degF",
+   "to": "degC",
+   "num": -40,
+   "den": 1,
+   "display": "-40",
+   "exact_text": "",
+   "note": "where the scales meet: F -> C (offset sign check)"
+  },
+  {
+   "value": "-40.5",
+   "from": "degF",
+   "to": "K",
+   "num": 41917,
+   "den": 180,
+   "display": "232.872222222",
+   "exact_text": "41917/180",
+   "note": "negative, off the crossover"
   },
   {
    "value": "0",
@@ -169,6 +189,26 @@
    "display": "220.632233381",
    "exact_text": "8896443230521/40322500000",
    "note": "tyre pressure"
+  },
+  {
+   "value": "1",
+   "from": "psi",
+   "to": "Pa",
+   "num": 8896443230521,
+   "den": 1290320000,
+   "display": "6894.75729317",
+   "exact_text": "8896443230521/1290320000",
+   "note": "exact fraction 8896443230521/1290320000, never a float"
+  },
+  {
+   "value": "1",
+   "from": "torr",
+   "to": "Pa",
+   "num": 20265,
+   "den": 152,
+   "display": "133.322368421",
+   "exact_text": "20265/152",
+   "note": "exact fraction 20265/152"
   },
   {
    "value": "1",
@@ -326,6 +366,12 @@
    "from": "m",
    "to": "ft",
    "error": "is not a number"
+  },
+  {
+   "value": "1",
+   "from": "degC",
+   "to": "J",
+   "error": "cannot convert temperature (degC) to energy (J)"
   }
  ]
 }

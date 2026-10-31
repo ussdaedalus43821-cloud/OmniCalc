@@ -1,0 +1,171 @@
+# src/math/units.nova - unit conversion over the checked-in table
+# src/math/units.json (docs/M8-MATH-DESIGN.md "units.nova").
+#
+# Every factor in the table is exact by definition, and conversions are exact
+# rational arithmetic: x * f_from / f_to, or for temperature (affine)
+# (x + o_from) * f_from / f_to - o_to. The only rounding is display
+# (scientific.display). Values are parsed with scientific.evaluate, so the
+# host passes text as typed ("72.5", "-40", even "3*12") and does no maths.
+#
+# File I/O and JSON decoding stay in the caller (the host, or a top-level
+# script): `json` - like PI and E - is undefined inside an imported NovaLang
+# module (verified, M8), so load() takes the PARSED table. load() memoizes the
+# last table it validated (dict equality is one native comparison), so a
+# Calculate press does not re-validate 84 units.
+
+import "./scientific.nova" as sci
+
+let NUMBER_SHAPE = "^[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?\\Z"
+let DISPLAY_DIGITS = 12
+let cache = {data: {}, table: {}}
+
+def fail(message) {
+    throw("units: " + message)
+}
+
+# "0.3048", "1.602176634e-19" or "num/den" -> an exact positive value.
+def parse_factor(text, what) {
+    if type(text) != "string" {
+        fail(what + " must be text, got " + str(text))
+    }
+    let parts = split(text, "/")
+    if len(parts) > 2 {
+        fail(what + " \"" + text + "\" is not a number")
+    }
+    for part in parts {
+        if not regex(NUMBER_SHAPE, part) {
+            fail(what + " \"" + text + "\" is not a number")
+        }
+    }
+    let value = sci.literal(parts[0])
+    if len(parts) == 2 {
+        value = sci.divide(value, sci.literal(parts[1]))
+    }
+    return value
+}
+
+def build(data) {
+    if type(data) != "dict" or not ("categories" in data) or not ("units" in data) {
+        fail("the table needs \"categories\" and \"units\"")
+    }
+    let index = {}
+    let order = []
+    for unit in data.units {
+        if type(unit) != "dict" or not ("symbol" in unit) or not ("category" in unit) or not ("factor" in unit) {
+            fail("each unit needs a symbol, category and factor, got " + str(unit))
+        }
+        let symbol = unit.symbol
+        if not (unit.category in data.categories) {
+            fail(symbol + ": unknown category \"" + unit.category + "\"")
+        }
+        let factor = parse_factor(unit.factor, symbol + " factor")
+        if factor.num <= 0 {
+            fail(symbol + ": factor must be positive")
+        }
+        let offset = sci.exact(0, 1)
+        if "offset" in unit {
+            if unit.category != "temperature" {
+                fail(symbol + ": only temperature units may have an offset")
+            }
+            offset = parse_factor(unit.offset, symbol + " offset")
+        }
+        let entry = {symbol: symbol, name: unit.name, category: unit.category, factor: factor, offset: offset}
+        let names = [symbol]
+        if "aliases" in unit {
+            for alias in unit.aliases {
+                append(names, alias)
+            }
+        }
+        for name in names {
+            if name in index {
+                fail("\"" + name + "\" is listed twice")
+            }
+            index[name] = entry
+        }
+        append(order, entry)
+    }
+    let categories = []
+    for name in keys(data.categories) {
+        append(categories, name)
+    }
+    return {index: index, units: order, categories: categories}
+}
+
+# The validated table from the parsed units.json data, memoized.
+export def load(data) {
+    if "units" in cache.table and data == cache.data {
+        return cache.table
+    }
+    let table = build(data)
+    cache["data"] = data
+    cache["table"] = table
+    return table
+}
+
+# A unit by symbol or alias, case-sensitive (mm != Mm, b = bit, B = byte).
+export def find(table, name) {
+    if name in table.index {
+        return table.index[name]
+    }
+    fail("unknown unit \"" + name + "\"" + suggestion(table, name))
+}
+
+# " (did you mean \"ft\"?)" from a case-insensitive match, else the longest
+# symbol the name starts with (fts -> ft), else "".
+def suggestion(table, name) {
+    let wanted = lower(name)
+    let best = {symbol: "", length: 0}
+    for candidate in keys(table.index) {
+        let symbol = table.index[candidate].symbol
+        if lower(candidate) == wanted {
+            return " (did you mean \"" + symbol + "\"?)"
+        }
+        let size = len(candidate)
+        if size > best.length and size < len(wanted) and lower(wanted[0:size]) == lower(candidate) {
+            best["symbol"] = symbol
+            best["length"] = size
+        }
+    }
+    if best.length > 0 {
+        return " (did you mean \"" + best.symbol + "\"?)"
+    }
+    return ""
+}
+
+# value (a scientific value) from one unit to another; exact in, exact out.
+export def convert(table, value, from_name, to_name) {
+    let source = find(table, from_name)
+    let target = find(table, to_name)
+    if source.category != target.category {
+        fail("cannot convert " + source.category + " (" + source.symbol + ") to " + target.category + " (" + target.symbol + ")")
+    }
+    let base = sci.mul(sci.add(value, source.offset), source.factor)
+    return sci.sub(sci.divide(base, target.factor), target.offset)
+}
+
+# The value as typed -> {value, display, exact_text}.
+export def convert_text(table, text, from_name, to_name) {
+    let parsed = {value: {}}
+    try {
+        parsed["value"] = sci.evaluate(text, {}).value
+    } catch problem {
+        fail("the value \"" + str(text) + "\" is not a number (" + str(problem) + ")")
+    }
+    let result = convert(table, parsed.value, from_name, to_name)
+    return {value: result, display: sci.display(result, DISPLAY_DIGITS), exact_text: sci.exact_text(result)}
+}
+
+# Symbols of a category, in table order (for the UI's choices).
+export def units_in(table, category) {
+    let symbols = []
+    for unit in table.units {
+        if unit.category == category {
+            append(symbols, unit.symbol)
+        }
+    }
+    return symbols
+}
+
+export def categories(table) {
+    return table.categories
+}

@@ -109,5 +109,16 @@ class InvestmentsCsvTest(unittest.TestCase):
         self.assertEqual(parsed, vector["expected"]["positions"])
 
 
+class MathCsvTest(unittest.TestCase):
+    def test_conversion_table(self):
+        result = app.calculate("math", "1 + 1", "rad", "1", "psi", "Pa", app.load_units_table())
+        buffer = io.StringIO()
+        app.export_csv(result, buffer)
+        rows = list(csv.reader(io.StringIO(buffer.getvalue())))
+        self.assertEqual(rows[0], ["unit", "name", "value", "exact"])
+        pa = [row for row in rows if row[0] == "Pa"][0]
+        self.assertEqual(pa[2:], ["6894.75729317", "8896443230521/1290320000"])   # exact fraction kept
+
+
 if __name__ == "__main__":
     unittest.main()

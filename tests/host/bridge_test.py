@@ -27,6 +27,9 @@ SCREEN_INPUTS = {
                     ([["Big", "9,000", "18", "200"], ["Small", "1,500", "18", "40"]], "600", "snowball")],
     "investments": [(json.load(open(os.path.join(REPO_ROOT, "tests", "app", "vectors", "portfolio_20.json")))["rows"], "2025-10-31"),
                     ([["VTI", "10", "150", "195.17", "2023-01-15"], ["CASH", "1000", "1", "1", ""]], "2025-10-31")],
+    "math": [("3 + 4 * (2 - 1)", "rad", "98.6", "degF", "degC", app.load_units_table()),
+             ("sin(30) + 1/3", "deg", "1", "psi", "Pa", app.load_units_table()),
+             ("2 pi", "rad", "", "", "", app.load_units_table())],
 }
 # CI runners are slower and noisier than a workstation; the workflow may
 # raise this with OMNICALC_BUDGET_MS. Locally it is the real 100 ms budget.
@@ -36,7 +39,7 @@ BUDGET_MS = float(os.environ.get("OMNICALC_BUDGET_MS", app.BUDGET_MS))
 def cli_result(screen, *inputs):
     completed = subprocess.run(
         [sys.executable, nova_runtime.NOVA_SCRIPT, os.path.join(REPO_ROOT, "tools", "calc_cli.nova"), screen,
-         *[json.dumps(value) if isinstance(value, list) else value for value in inputs]],
+         *[json.dumps(value) if isinstance(value, (list, dict)) else value for value in inputs]],
         capture_output=True, text=True, check=True, cwd=REPO_ROOT,
     )
     return json.loads(completed.stdout)

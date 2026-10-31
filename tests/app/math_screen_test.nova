@@ -1,0 +1,32 @@
+# module: math_screen
+# expect: 11
+#
+# The Math tab's facade. The maths itself is pinned by tests/math/*; this
+# checks the wiring: both sections, blanks, per-section errors, the table.
+
+import "../../tools/check.nova" as t
+import "../../src/app/math_screen.nova" as screen
+
+let data = json.loads(read("src/math/units.json"))
+
+let both = screen.calculate("3 + 4 * (2 - 1)", "rad", "98.6", "degF", "degC", data)
+t.check("expression result", [both.result, both.exact], ["7", ""])
+t.check("conversion result", both.converted, "37 degC")
+def first(row) {
+    return row[0]
+}
+t.check("the table lists every temperature unit", map(first, both.rows), ["K", "degC", "degF", "degR"])
+t.check("an exact fraction is shown beside its rounding", screen.calculate("1/3", "rad", "", "", "", data).exact, "1/3")
+t.check("degree mode", screen.calculate("sin(30)", "deg", "", "", "", data).result, "0.5")
+let blanks = screen.calculate("", "rad", "", "", "", data)
+t.check("blank sections show a dash, not an error", [blanks.result, blanks.converted, blanks.rows], ["—", "—", []])
+let bad_expression = screen.calculate("2 pi", "rad", "1", "mi", "km", data)
+t.check("an expression error is shown as text", bad_expression.result, "error: math: missing operator before \"pi\" at position 2")
+t.check("...and does not hide a valid conversion", bad_expression.converted, "1.609344 km")
+let bad_unit = screen.calculate("1 + 1", "rad", "1", "fts", "m", data)
+t.check("a unit error is shown with its suggestion", bad_unit.converted, "error: units: unknown unit \"fts\" (did you mean \"ft\"?)")
+t.check("...and the expression still works", bad_unit.result, "2")
+def bad_angle() { screen.calculate("1", "grad", "", "", "", data) }
+t.check_throws("an unknown angle mode is rejected", bad_angle, "angle must be rad or deg")
+
+t.finish()

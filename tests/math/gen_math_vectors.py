@@ -332,10 +332,14 @@ def units_cases():
     case("1", "st", "lb", "exactly 14")
     case("1", "kg", "oz")
     case("98.6", "degF", "degC", "body temperature: exactly 37")
-    case("-40", "degC", "degF", "where the scales meet")
+    case("-40", "degC", "degF", "where the scales meet: C -> F")
+    case("-40", "degF", "degC", "where the scales meet: F -> C (offset sign check)")
+    case("-40.5", "degF", "K", "negative, off the crossover")
     case("0", "K", "degC", "exactly -273.15")
     case("100", "degC", "degR")
     case("32", "psi", "kPa", "tyre pressure")
+    case("1", "psi", "Pa", "exact fraction 8896443230521/1290320000, never a float")
+    case("1", "torr", "Pa", "exact fraction 20265/152")
     case("1", "atm", "torr", "exactly 760")
     case("1", "atm", "psi")
     case("1", "kWh", "BTU")
@@ -354,6 +358,7 @@ def units_cases():
         {"value": "1", "from": "fts", "to": "m", "error": "unknown unit \"fts\""},
         {"value": "1", "from": "MM", "to": "m", "error": "unknown unit \"MM\"", "note": "symbols are case-sensitive"},
         {"value": "abc", "from": "m", "to": "ft", "error": "is not a number"},
+        {"value": "1", "from": "degC", "to": "J", "error": "cannot convert temperature (degC) to energy (J)"},
     ]
     return cases, errors
 

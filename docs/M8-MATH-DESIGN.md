@@ -1,9 +1,16 @@
 # M8 — Math engine: API proposal (for review before implementation)
 
-Status: **API approved**:
-- `scientific.nova` is **implemented and green** (112 checks against the generator's vectors);
-- `units.nova` and `datetime.nova` are next;
-- the data file is `src/math/units.json`. The Python reference generator `tests/math/gen_math_vectors.py` already
+Status: **API approved; all of M8 implemented and green**:
+- `scientific.nova` (112 checks);
+- `units.nova` (53 checks);
+- `datetime.nova` (69 checks);
+- `math_screen.nova` (11 checks) and the Math tab.
+
+Changes made during implementation:
+- **`units.load` takes the parsed table, not text.** `json`, like `PI` and `E`, is undefined
+  inside imported modules.
+- **The 30/360 convention is named `"30/360"`** and means ISDA 2006 §4.16(f) bond basis.
+  "30/360 US" usually means the SIA variant with a February rule, which this isn't. The Python reference generator `tests/math/gen_math_vectors.py` already
 encodes the semantics below, so reviewing this document and the generated vectors together is
 reviewing the behavior.
 
@@ -156,13 +163,14 @@ isqrt(n)                -> int           # floor(sqrt(n)) for int n >= 0, exact
   file, and fails on any mismatch.
 - **Temperature is affine:** `kelvin = (x + offset) × factor`. For °F the factor is 5/9 and the
   offset 459.67. Only temperature may have an offset.
-- **File I/O stays in the host** (the boundary table). The host reads `units.json` as text, and
-  the façade passes that text to `units.load`. `json.loads` is one built-in call, and validation
-  will be profiled.
+- **File I/O and JSON decoding stay in the host** (the boundary table). The host passes the
+  *parsed* table to `units.load`, because `json` is undefined inside NovaLang modules.
+- **Cost:** the first load validates 84 units in 22 ms, and `load` memoizes the result. A
+  memoized press is about 1.5 ms, including the bridge copying the dict.
 
 ### API
 ```
-load(json_text)                       -> table   # validates: unique symbols+aliases, known
+load(data)                            -> table   # parsed units.json; validates: unique symbols+aliases, known
                                                   #   categories, factors parse as exact positive
                                                   #   rationals, offsets only for temperature
 find(table, symbol_or_alias)          -> unit    # case-sensitive (mm != Mm, b = bit, B = byte)
@@ -191,8 +199,10 @@ categories(table)                     -> [category]
     `business_days_between(a, b, holidays)` (counted over `(a, b]`).
   - `holidays` is a user-supplied list of serials, and weekends are Saturday and Sunday.
 - **`day_count(start, end, convention)`** returns an exact `{num, den}` year fraction. The
-  conventions are `"act/365f"` (exists), `"act/360"`, `"30/360us"` (bond basis), `"30e/360"`
-  and `"act/act-isda"`. ISDA is exact, with denominators of 365 and 366.
+  conventions are `"act/365f"`, `"act/360"`, `"30/360"` (ISDA 2006 §4.16(f) bond basis, no
+  February rule), `"30e/360"` (§4.16(g)) and `"act/act-isda"`. ISDA is exact, with denominators
+  of 365 and 366.
+- **Reference:** `tests/math/gen_datetime_vectors.py`, using Python `datetime` and `fractions`.
 
 ## `src/app/math_screen.nova` and the Math tab
 - **One façade call:** `calculate(expression, angle, value, from_unit, to_unit, units_json)`.

@@ -24,6 +24,7 @@ Tkinter or a display, so it can be tested headless.
 import argparse
 import csv
 import datetime
+import json
 import os
 import sys
 import time
@@ -149,6 +150,32 @@ SCREENS = [
         ],
     },
 ]
+def load_units_table():
+    """The parsed src/math/units.json. File I/O and decoding are the host's job
+    (and `json` is undefined inside NovaLang modules); the table's semantics -
+    validation, factors, conversions - are all NovaLang's (src/math/units.nova)."""
+    with open(os.path.join(REPO_ROOT, "src", "math", "units.json"), encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+SCREENS.append({
+    "key": "math",
+    "title": "Math",
+    "facade": os.path.join("src", "app", "math_screen.nova"),
+    "fields": [
+        ("expression", "Expression (e.g. 3 + 4 * (2 - 1), sqrt(2), sin(30))", "3 + 4 * (2 - 1)"),
+        ("angle", "Angles", "rad", {"choices": [("rad", "Radians"), ("deg", "Degrees")]}),
+        ("value", "Convert value", "98.6"),
+        ("from_unit", "From unit", "degF"),
+        ("to_unit", "To unit", "degC"),
+        ("units", "", load_units_table(), {"hidden": True}),
+    ],
+    "summary": [
+        ("result", "Result", "text"),
+        ("exact", "Exact", "text"),
+        ("converted", "Converted", "text"),
+    ],
+})
 SCREENS_BY_KEY = {screen["key"]: screen for screen in SCREENS}
 SCREEN_KEYS = [screen["key"] for screen in SCREENS]
 
@@ -317,6 +344,10 @@ def build_tab(notebook, screen, debug, tk, ttk, filedialog):
     for field in screen["fields"]:
         key, label, default = field[0], field[1], field[2]
         options = field_options(field)
+        if options.get("hidden"):
+            # Data the host loaded (e.g. the units table): passed through, no widget.
+            readers.append(lambda value=default: value)
+            continue
         if "rows" in options:
             readers.append(build_rows_field(frame, label, default, options["rows"], mark_stale, tk, ttk))
             continue

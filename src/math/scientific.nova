@@ -98,28 +98,28 @@ export def to_float(v) {
     return v.num * 1.0 / v.den
 }
 
-def add(a, b) {
+export def add(a, b) {
     if is_exact(a) and is_exact(b) {
         return exact(a.num * b.den + b.num * a.den, a.den * b.den)
     }
     return float_value(to_float(a) + to_float(b))
 }
 
-def sub(a, b) {
+export def sub(a, b) {
     if is_exact(a) and is_exact(b) {
         return exact(a.num * b.den - b.num * a.den, a.den * b.den)
     }
     return float_value(to_float(a) - to_float(b))
 }
 
-def mul(a, b) {
+export def mul(a, b) {
     if is_exact(a) and is_exact(b) {
         return exact(a.num * b.num, a.den * b.den)
     }
     return float_value(to_float(a) * to_float(b))
 }
 
-def divide(a, b) {
+export def divide(a, b) {
     if is_exact(b) and b.num == 0 {
         fail("division by zero")
     }
@@ -133,7 +133,7 @@ def divide(a, b) {
     return float_value(to_float(a) / y)
 }
 
-def negate(a) {
+export def negate(a) {
     if is_exact(a) {
         return {kind: "exact", num: 0 - a.num, den: a.den}
     }
@@ -141,7 +141,7 @@ def negate(a) {
 }
 
 # -1, 0 or 1.
-def compare(a, b) {
+export def compare(a, b) {
     if is_exact(a) and is_exact(b) {
         let l = a.num * b.den
         let r = b.num * a.den
@@ -650,6 +650,13 @@ export def tokenize(text) {
     }
     append(tokens, {kind: "end", text: "", at: n})
     return tokens
+}
+
+# A number literal's text (as the tokenizer accepts it: digits, optional
+# fraction, optional exponent) -> an exact value. Exported for units.nova,
+# which parses its table's factors with it; callers must pass valid text.
+export def literal(text) {
+    return literal_value(text)
 }
 
 # A number token's text -> an exact value (mantissa digits over 10^decimals,
