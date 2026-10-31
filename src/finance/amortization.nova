@@ -80,28 +80,37 @@ def lumps_by_period(lump_sums, unit, n) {
     return table
 }
 
-def run(principal, rate, n, payment, extra, lump_sums) {
+# Validates every input once and returns the plain ints the core needs.
+def checked_inputs(principal, rate, n, payment, extra, lump_sums) {
     rates.check_rate(rate)
     let periods = require_periods(n)
     let balance = require_amount(principal, principal, "principal", false)
     let regular = require_amount(payment, principal, "payment", false)
     let extra_minor = require_amount(extra, principal, "extra principal", true)
     let lumps = lumps_by_period(lump_sums, principal, periods)
-    let d = rate.den * MICRO
-
-    let first_interest = money.round_half_up(balance * rate.num, d)
+    let first_interest = money.round_half_up(balance * rate.num, rate.den * MICRO)
     if regular + extra_minor <= first_interest {
         throw("amortization: a payment of " + str(regular + extra_minor) + " does not exceed the first period's interest of " + str(first_interest) + " minor units, so the balance never falls (negative amortization)")
     }
+    return {balance: balance, regular: regular, extra: extra_minor, lumps: lumps, periods: periods, rate: rate, scale: principal.scale, currency: principal.currency}
+}
 
-    let scale = principal.scale
-    let currency = principal.currency
+# The unchecked core (CLAUDE.md "Hot-loop primitives"): plain ints in, rows
+# of plain ints out, [period, payment, interest, principal, balance,
+# regular, extra, adjustment]; the last row is the final one. `inputs` MUST
+# come from checked_inputs().
+def table_whole(inputs) {
+    let d = inputs.rate.den * MICRO
+    let num_rate = inputs.rate.num
+    let balance = inputs.balance
+    let regular = inputs.regular
+    let periods = inputs.periods
     let rows = []
     let totals = {paid: 0, interest: 0}
     for period = 1 to periods {
-        let interest = money.round_half_up_whole(balance * rate.num, d)
+        let interest = money.round_half_up_whole(balance * num_rate, d)
         let due = balance + interest
-        let extra_here = extra_minor + lumps[period]
+        let extra_here = inputs.extra + inputs.lumps[period]
         let scheduled = regular + extra_here
         let final = scheduled >= due or period == periods
         let paid = scheduled
@@ -112,33 +121,57 @@ def run(principal, rate, n, payment, extra, lump_sums) {
         balance = balance - principal_part
         totals["paid"] = totals.paid + paid
         totals["interest"] = totals.interest + interest
-        let kind = "regular"
-        if final {
-            kind = "final"
-        }
-        append(rows, {
-            period: period,
-            payment: {minor: paid, scale: scale, currency: currency},
-            interest: {minor: interest, scale: scale, currency: currency},
-            principal: {minor: principal_part, scale: scale, currency: currency},
-            balance: {minor: balance, scale: scale, currency: currency},
-            regular: {minor: regular, scale: scale, currency: currency},
-            extra: {minor: extra_here, scale: scale, currency: currency},
-            adjustment: {minor: paid - scheduled, scale: scale, currency: currency},
-            kind: kind
-        })
+        append(rows, [period, paid, interest, principal_part, balance, regular, extra_here, paid - scheduled])
         if final {
             break
         }
     }
     return {
+        scale: inputs.scale,
+        currency: inputs.currency,
+        principal: inputs.balance,
+        columns: ["period", "payment", "interest", "principal", "balance", "regular", "extra", "adjustment"],
         rows: rows,
-        totals: {
-            total_paid: {minor: totals.paid, scale: scale, currency: currency},
-            total_interest: {minor: totals.interest, scale: scale, currency: currency},
-            payoff_period: len(rows)
-        }
+        total_paid: totals.paid,
+        total_interest: totals.interest,
+        payoff_period: len(rows)
     }
+}
+
+def unit(table, minor) {
+    return {minor: minor, scale: table.scale, currency: table.currency}
+}
+
+# The checked path: the core's int rows wrapped as money rows.
+def run(principal, rate, n, payment, extra, lump_sums) {
+    let table = table_whole(checked_inputs(principal, rate, n, payment, extra, lump_sums))
+    let rows = []
+    let last = len(table.rows)
+    for r in table.rows {
+        let kind = "regular"
+        if r[0] == last {
+            kind = "final"
+        }
+        append(rows, {
+            period: r[0], payment: unit(table, r[1]), interest: unit(table, r[2]), principal: unit(table, r[3]),
+            balance: unit(table, r[4]), regular: unit(table, r[5]), extra: unit(table, r[6]), adjustment: unit(table, r[7]),
+            kind: kind
+        })
+    }
+    return {
+        rows: rows,
+        totals: {total_paid: unit(table, table.total_paid), total_interest: unit(table, table.total_interest), payoff_period: table.payoff_period}
+    }
+}
+
+# The same schedule as schedule_with_extra(), as a compact table of plain
+# ints for screen facades and cash-flow code: {scale, currency, principal,
+# columns, rows, total_paid, total_interest, payoff_period}, where each row
+# is [period, payment, interest, principal, balance, regular, extra,
+# adjustment] in minor units and the last row is the final one. Inputs are
+# checked exactly as schedule_with_extra() checks them.
+export def schedule_table(principal, rate, n, payment, extra_principal_per_period, lump_sums) {
+    return table_whole(checked_inputs(principal, rate, n, payment, extra_principal_per_period, lump_sums))
 }
 
 # A fixed-payment schedule over at most n periods. Returns {rows, totals}:

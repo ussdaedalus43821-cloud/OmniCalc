@@ -63,3 +63,8 @@ Filed as https://github.com/ussdaedalus43821-cloud/Nova_Lang/issues/4. OmniCalc'
   number`, with no source excerpt, so the host shows it as is.
 - Arguments and results cross the bridge as copies (`to_nova_value` / `to_python_value`), as
   the README warns. The screen façade returns plain ints, strings and lists, so this is free.
+
+## M5
+No new upstream findings. Two reminders that cost a rename each: `split` is a built-in, so it can't
+be a variable name, and neither can `values`. Both are already covered by the `CLAUDE.md` rule on
+reserved names.

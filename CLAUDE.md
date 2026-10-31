@@ -71,6 +71,31 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
   `/usr/bin/python3.12`), then `python3.12 src/host/app.py`. The calculation path imports
   without Tkinter or a display.
 
+## Screens and navigation (decided before screen two, M5)
+- **One window, one `ttk.Notebook` tab per screen.** Tabs are the standard pattern for a calculator
+  suite: cheap, familiar, uncluttered, and each tab keeps its widgets, so **inputs and results
+  survive switching**.
+- **No auto-calculate.** A tab recalculates only on **Calculate** (or Enter). Editing any input marks
+  its results **stale** ("Inputs changed - press Calculate…") until then.
+- A screen is one entry in `app.SCREENS`: its façade file, its input fields (as `calculate()` takes
+  them), and its summary items with a display kind (`money`, `count`, `percent`, `text`). The table
+  and CSV come from the façade's `columns`, `column_kinds` and `rows`, so one exporter serves every
+  screen.
+- Each screen gets **its own NovaLang engine**, because every façade exports `calculate`. Startup
+  warms up all of them.
+
+## Screen façades: one is a pattern, two is evidence
+- A façade (`src/app/<screen>_screen.nova`) exports `calculate(<input boxes as strings>)` and returns
+  `{currency, scale, <summary fields>, columns, column_kinds, rows, assumptions}`. It holds all the
+  screen's parsing and math.
+- **Don't generalize on N = 1.** M4 had one façade, so nothing was abstracted.
+- **Evidence from M5 (N = 3):** the host side generalized with **no change to the contract**,
+  except adding `column_kinds`. One `SCREENS` loop, one exporter, one CLI dispatcher, one bridge
+  test, and the arithmetic guard passed unchanged.
+- **What's duplicated in NovaLang:** the `amount()` / rate-parsing helpers and the
+  `CURRENCY`/`SCALE` constants are copied in all three façades. That's the extraction candidate
+  (a shared `src/app/inputs.nova`). Decide at the start of M6, not mid-screen.
+
 ## Host / NovaLang boundary
 | Python host owns | NovaLang owns |
 |---|---|
@@ -111,6 +136,12 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
   - `cashflow.irr(from_schedule(s))` (checked) / `cashflow.schedule_irr(s)` (unchecked core
     `shape_whole`, for schedules built by `amortization.nova`). This cut end to end from
     89 ms to 60 ms. A test checks that both agree.
+  - `amortization.schedule*` (money rows) / `amortization.schedule_table` (the int-row core
+    `table_whole`, after the same input checks), plus `cashflow.table_irr(table, guess)`. It
+    builds the IRR polynomial straight from the int rows and starts bisection from a
+    3-micro-unit bracket around the guess, falling back to the full search. The amortization
+    screen dropped from 56.7 to 40.5 ms. Tests check agreement with the money-row path, and that
+    a bad guess falls back correctly.
 
 ## Solver rules
 - **Sign convention.** Cash received is positive and cash paid out is negative. A loan you take
@@ -233,6 +264,32 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
 - **References:** Microsoft's XNPV/XIRR example (XNPV(9%) = 2,086.65, XIRR 0.373362535,
   where Excel is only good to 1e-8) and `tests/finance/gen_xcashflow_vectors.py` (50 digits).
 
+## Savings convention (`src/app/savings_screen.nova`, M5)
+- Contributions are made at the **end of each month** (an ordinary annuity), matching the loan
+  payment convention. **Start-of-month is deliberately not offered in v1.**
+- Monthly rate = annual / 12, kept exact. Each year's balance is `tvm.fv`, rounded half-up to the
+  cent. Interest earned = balance − (initial deposit + contributions so far).
+- Rejected: an annual rate ≤ −100%, fractional or out-of-range years (1–100), and negative amounts.
+- Checked against `tests/app/gen_savings_vectors.py`, which uses the textbook FV formula at 80 digits.
+
+## Refinance convention (`src/finance/refinance.nova`, M5)
+- **Closing costs are all-in** (points, appraisal, title, everything). They are paid out of pocket
+  at period 0 and **not amortized** into the new loan, whose principal is the current principal.
+- The new payment is `tvm.pmt` at the new rate and term. Both loans run through
+  `amortization.schedule_table`, so final adjustments count. Month k's saving = current payment −
+  new payment, each 0 once its loan is paid off.
+- **Break-even** = the smallest month k ≥ 1 where the cumulative saving ≥ the closing costs.
+  NovaLang has no null, so the result carries `breaks_even: bool` and `break_even_month` (0 when
+  it never breaks even).
+- **`total_savings`** (as briefed) sums the savings over the **shorter** schedule, minus the
+  closing costs. **`lifetime_savings`** = current total paid − (new total paid + closing). When the
+  terms differ the two disagree, sometimes in sign:
+  - 30 → 15 years: `total_savings` −$63,140, `lifetime_savings` +$164,400;
+  - a fresh 30-year five years in: +$90,651 vs +$33,731.
+  The screen shows both.
+- **Throws** when the new rate is not lower **and** the new payment is not lower: nothing is saved,
+  so there's no break-even.
+
 ## Amortization rules (`src/finance/amortization.nova`)
 - **Magnitudes, not signed cash flows.** Principal, payment, extra and lump sums are positive
   money, and rows report positive amounts. To use a TVM payment, which is negative, pass
@@ -317,7 +374,8 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
 - src/core/math — scientific, units, algebra hooks
 - src/finance/tvm.nova — PV/FV/PMT/N/rate (M1)
 - src/finance/cashflow.nova — NPV, IRR, payback, from_schedule (M3)
-- src/finance/amortization.nova — schedules, extra payments, biweekly (M2); refinance later
+- src/finance/amortization.nova — schedules, extra payments, biweekly (M2); schedule_table (pre-M5)
+- src/finance/refinance.nova — keep vs refinance comparison (M5)
 - src/finance/investments — compound interest (v1); CAGR, DCA, retirement (later)
 - src/finance/business — margin, break-even, ROI, depreciation (post-v1)
 - src/app — NovaLang screen façades (one per screen; all the screen's math)
@@ -362,8 +420,7 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
   - Tests: `tests/finance/cashflow_test.nova`, with Python vectors from
     `tests/finance/gen_cashflow_vectors.py`.
   - Not in M3: XNPV/XIRR, which need dated flows.
-- **M4 — XNPV/XIRR, dates-based cash flows, and the start of the UI host.** 🚧 in progress,
-  awaiting review.
+- **M4 — XNPV/XIRR, dates-based cash flows, and the start of the UI host.** ✅ done, reviewed.
   - `cashflow.xnpv`, `cashflow.xirr` (Excel convention; XIRR supports one sign change).
   - Host:
     - `src/core/parse.nova`, `src/app/amortization_screen.nova` (the screen's one façade);
@@ -371,10 +428,25 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
     - `tools/calc_cli.nova`.
   - Tests: `tests/core/parse_test.nova`, `tests/app/amortization_screen_test.nova`, and
     `tests/host/bridge_test.py` + `csv_test.py`, which CI runs with `unittest`.
-- **M5 — more screens:** compound interest, savings, refinance, debt payoff (a full UI pass).
+- **M5 — two more screens (savings, refinance) and the multi-screen shell.** 🚧 in progress,
+  awaiting review.
+  - Pre-M5: `schedule_table` + `table_irr` (56.7 → 40.5 ms); the navigation decision; the façade
+    note above.
+  - `src/finance/refinance.nova`, `src/app/savings_screen.nova`,
+    `src/app/refinance_screen.nova`, and `app.py` as a three-tab Notebook.
+  - Tests:
+    - `tests/finance/refinance_test.nova` (vectors: `gen_refinance_vectors.py`);
+    - `tests/app/savings_screen_test.nova` (vectors: `gen_savings_vectors.py`);
+    - `tests/app/refinance_screen_test.nova`;
+    - the host tests, now covering all three screens.
+  - Nightly performance monitor: `tools/perf.py` plus a CI job that uploads `perf-results.json`
+    and fails only the nightly job on a >20% median regression vs `tools/perf_baseline.json`.
+  - Not in M5: debt payoff (snowball/avalanche), which comes in M6.
+- **M6 — debt payoff, plus the two planned escape hatches** (`docs/ESCAPE-HATCHES.md`).
 - **Later — compound interest** (`investments`).
 - **Later — Scientific + units** (`core/math`).
 - **Later — the full Tkinter host:** screens with formula/assumptions, CSV export, a terminal debug
   harness.
-- **CI** (`.github/workflows/tests.yml`): `tools/run_tests.py` on every push and PR, plus a nightly
-  `--bootstrap` job (cron, 07:17 UTC).
+- **CI** (`.github/workflows/tests.yml`):
+  - on every push and PR: `tools/run_tests.py` and the host `unittest` suite;
+  - nightly (cron, 07:17 UTC): the `--bootstrap` job and the performance monitor.

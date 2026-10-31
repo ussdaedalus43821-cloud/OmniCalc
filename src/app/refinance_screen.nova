@@ -1,0 +1,74 @@
+# src/app/refinance_screen.nova - the refinance screen's calculation, behind
+# one call for the Python host. Same contract as amortization_screen.nova.
+#
+# Rates are typed as annual percentages and converted to monthly
+# (annual / 12, exact). Closing costs are all-in and paid up front, not
+# financed (src/finance/refinance.nova). The CSV/table is one row per
+# scenario - keep the current loan, or refinance - not one row per month.
+
+import "../core/parse.nova" as parse
+import "../core/money.nova" as money
+import "../core/rates.nova" as rates
+import "../finance/refinance.nova" as refi
+
+let CURRENCY = "USD"
+let SCALE = 2
+let RATE_INPUT_SCALE = 4
+let MONTHS_PER_YEAR = 12
+
+let ASSUMPTIONS = [
+    "Closing costs are all-in (points, appraisal, title...), paid up front, and not added to the new loan.",
+    "The new loan's principal is the current principal; its payment is the TVM closed form at the new rate and term.",
+    "Monthly rates are annual / 12. Both loans use their actual payments, including the final adjustment.",
+    "Break-even is the first month the cumulative savings reach the closing costs.",
+    "Savings over the shorter loan ignore the longer loan's extra months; lifetime savings include them."
+]
+
+def amount(text, what) {
+    let minor = parse.decimal(text, SCALE, what)
+    if minor < 0 {
+        throw("parse: " + what + " must not be negative")
+    }
+    return money.make(minor, SCALE, CURRENCY)
+}
+
+def monthly_rate(text, what) {
+    let micro = parse.decimal(text, RATE_INPUT_SCALE, what)
+    if micro < 0 {
+        throw("parse: " + what + " must not be negative")
+    }
+    return rates.per_period(rates.annual(micro), MONTHS_PER_YEAR)
+}
+
+export def calculate(principal_text, current_rate_text, remaining_text, payment_text, new_rate_text, new_term_text, closing_text) {
+    let principal = amount(principal_text, "current principal")
+    let current_rate = monthly_rate(current_rate_text, "current annual rate")
+    let remaining = parse.whole(remaining_text, "months remaining")
+    let payment = amount(payment_text, "current payment")
+    let new_rate = monthly_rate(new_rate_text, "new annual rate")
+    let new_term = parse.whole(new_term_text, "new term (months)")
+    let closing = amount(closing_text, "closing costs")
+    let result = refi.compare(principal, current_rate, remaining, payment, new_rate, new_term, closing)
+    let break_even = "never"
+    if result.breaks_even {
+        break_even = "month " + str(result.break_even_month)
+    }
+    return {
+        currency: CURRENCY,
+        scale: SCALE,
+        new_payment: result.new_payment.minor,
+        monthly_savings: result.monthly_savings.minor,
+        break_even: break_even,
+        breaks_even: result.breaks_even,
+        break_even_month: result.break_even_month,
+        total_savings: result.total_savings.minor,
+        lifetime_savings: result.lifetime_savings.minor,
+        columns: ["scenario", "monthly_payment", "total_paid", "total_interest", "payoff_month", "closing_costs"],
+        column_kinds: ["text", "money", "money", "money", "count", "money"],
+        rows: [
+            ["Keep current loan", payment.minor, result.current_total_paid.minor, result.current_total_interest.minor, result.payoff_period_current, 0],
+            ["Refinance", result.new_payment.minor, result.new_total_paid.minor, result.new_total_interest.minor, result.payoff_period_new, closing.minor]
+        ],
+        assumptions: ASSUMPTIONS
+    }
+}

@@ -1,0 +1,23 @@
+# module: refinance_screen
+# expect: 9
+#
+# The canonical refinance scenario (tests/finance/refinance_test.nova),
+# typed in as a person would.
+
+import "../../tools/check.nova" as t
+import "../../src/app/refinance_screen.nova" as screen
+
+let result = screen.calculate("200,000.00", "6.5", "360", "1,264.14", "5.0", "360", "6,000")
+t.check("new payment", result.new_payment, 107364)
+t.check("monthly savings", result.monthly_savings, 19050)
+t.check("break-even text", result.break_even, "month 32")
+t.check("total and lifetime savings", [result.total_savings, result.lifetime_savings], [6257258, 6257258])
+t.check("scenario rows", result.rows, [["Keep current loan", 126414, 45508582, 25508582, 360, 0], ["Refinance", 107364, 38651324, 18651324, 360, 600000]])
+t.check("column kinds line up with columns", len(result.column_kinds), len(result.columns))
+t.check("never breaking even reads as never", screen.calculate("200000", "6.5", "360", "1264.14", "6.4", "360", "100000").break_even, "never")
+def higher_rate() { screen.calculate("200000", "6.5", "360", "1264.14", "7", "360", "6000") }
+t.check_throws("a refinance that saves nothing is rejected", higher_rate, "saves nothing")
+def bad_closing() { screen.calculate("200000", "6.5", "360", "1264.14", "5", "360", "6000.001") }
+t.check_throws("closing costs with too many decimals are rejected", bad_closing, "closing costs \"6000.001\" has more than 2 decimal places")
+
+t.finish()

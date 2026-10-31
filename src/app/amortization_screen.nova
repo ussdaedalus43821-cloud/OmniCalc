@@ -55,24 +55,25 @@ export def calculate(principal_text, rate_text, months_text, extra_text) {
 
     let monthly = rates.per_period(rates.annual(annual_micro), MONTHS_PER_YEAR)
     let payment = money.negate(tvm.pmt(principal, money.make(0, SCALE, CURRENCY), months, monthly))
-    let schedule = am.schedule_with_extra(principal, monthly, months, payment, extra, [])
-    let rate = cf.schedule_irr(schedule)
+    let table = am.schedule_table(principal, monthly, months, payment, extra, [])
+    let rate = cf.table_irr(table, monthly)
     # percent with RATE_DISPLAY_SCALE decimals: rate.num / (rate.den * MICRO) * 12 * 100 * 10^scale
     let implied = money.round_half_up(rate.num * MONTHS_PER_YEAR * 100 * pow(10, RATE_DISPLAY_SCALE), rate.den * rates.MICRO)
 
     let rows = []
-    for row in schedule.rows {
-        append(rows, [row.period, row.payment.minor, row.interest.minor, row.principal.minor, row.balance.minor, row.extra.minor, row.adjustment.minor])
+    for r in table.rows {
+        append(rows, [r[0], r[1], r[2], r[3], r[4], r[6], r[7]])
     }
     return {
         currency: CURRENCY,
         scale: SCALE,
         payment: payment.minor,
-        total_paid: schedule.totals.total_paid.minor,
-        total_interest: schedule.totals.total_interest.minor,
-        payoff_period: schedule.totals.payoff_period,
+        total_paid: table.total_paid,
+        total_interest: table.total_interest,
+        payoff_period: table.payoff_period,
         implied_rate: {value: implied, scale: RATE_DISPLAY_SCALE},
         columns: ["period", "payment", "interest", "principal", "balance", "extra", "adjustment"],
+        column_kinds: ["count", "money", "money", "money", "money", "money", "money"],
         rows: rows,
         assumptions: ASSUMPTIONS
     }

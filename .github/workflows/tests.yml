@@ -46,3 +46,25 @@ jobs:
         with:
           python-version: "3.12"
       - run: python3 tools/run_tests.py --bootstrap
+
+  performance:
+    name: Performance monitor (nightly; not a merge gate)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Time every screen's calculate path (median, p90)
+        # Fails only this nightly job, on a >20% median regression against
+        # tools/perf_baseline.json (when one is committed).
+        run: python3 tools/perf.py --runs 20 --out perf-results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-results
+          path: perf-results.json

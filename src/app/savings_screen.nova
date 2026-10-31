@@ -1,0 +1,70 @@
+# src/app/savings_screen.nova - the savings screen's calculation, behind one
+# call for the Python host. Same contract as amortization_screen.nova: input
+# boxes as typed (strings) in; integers, scales and strings out.
+#
+# Convention (the only one in v1): contributions are made at the END of each
+# month, like loan payments (an ordinary annuity); monthly rate = annual / 12;
+# balances are tvm.fv, rounded half-up to the cent. Start-of-month timing is
+# deliberately not offered.
+
+import "../core/parse.nova" as parse
+import "../core/money.nova" as money
+import "../core/rates.nova" as rates
+import "../finance/tvm.nova" as tvm
+
+let CURRENCY = "USD"
+let SCALE = 2
+let RATE_INPUT_SCALE = 4
+let MONTHS_PER_YEAR = 12
+let MAX_YEARS = 100
+
+let ASSUMPTIONS = [
+    "Contributions are monthly, at the end of each month (none at the start).",
+    "Monthly rate = annual rate / 12, compounded monthly, kept exact.",
+    "Balance = the TVM future-value closed form, rounded half-up to the cent.",
+    "Interest earned = balance - (initial deposit + contributions so far)."
+]
+
+def amount(text, what) {
+    let minor = parse.decimal(text, SCALE, what)
+    if minor < 0 {
+        throw("parse: " + what + " must not be negative")
+    }
+    return money.make(minor, SCALE, CURRENCY)
+}
+
+export def calculate(initial_text, contribution_text, rate_text, years_text) {
+    let initial = amount(initial_text, "initial deposit")
+    let contribution = amount(contribution_text, "monthly contribution")
+    let annual_micro = parse.decimal(rate_text, RATE_INPUT_SCALE, "annual rate")
+    if annual_micro <= 0 - rates.MICRO {
+        throw("parse: annual rate must be above -100%")
+    }
+    let years = parse.whole(years_text, "years")
+    if years < 1 or years > MAX_YEARS {
+        throw("parse: years must be 1-" + str(MAX_YEARS) + ", got " + str(years))
+    }
+    let monthly = rates.per_period(rates.annual(annual_micro), MONTHS_PER_YEAR)
+    let deposit = money.negate(initial)
+    let payment = money.negate(contribution)
+    let rows = []
+    for year = 1 to years {
+        let months = year * MONTHS_PER_YEAR
+        let balance = tvm.fv(deposit, payment, months, monthly).minor
+        let contributed = initial.minor + contribution.minor * months
+        append(rows, [year, contributed, balance - contributed, balance])
+    }
+    let last = rows[len(rows) - 1]
+    return {
+        currency: CURRENCY,
+        scale: SCALE,
+        future_value: last[3],
+        total_contributed: last[1],
+        total_interest: last[2],
+        months: years * MONTHS_PER_YEAR,
+        columns: ["year", "contributed", "interest_earned", "balance"],
+        column_kinds: ["count", "money", "money", "money"],
+        rows: rows,
+        assumptions: ASSUMPTIONS
+    }
+}

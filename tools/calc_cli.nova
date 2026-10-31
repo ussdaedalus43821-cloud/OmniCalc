@@ -1,14 +1,28 @@
-# tools/calc_cli.nova - the amortization screen's calculation from the
-# command line, printed as JSON. tests/host/bridge_test.py compares this with
-# what the Python host gets through the embedding API, to prove the host
-# adds nothing of its own.
+# tools/calc_cli.nova - any screen's calculation from the command line,
+# printed as JSON. tests/host/bridge_test.py compares this with what the
+# Python host gets through the embedding API, to prove the host adds nothing
+# of its own.
 #
-#   python3 vendor/Nova_Lang/novalang.py tools/calc_cli.nova 200000.00 6.5 360 0
+#   python3 vendor/Nova_Lang/novalang.py tools/calc_cli.nova amortization 200000.00 6.5 360 0
+#   python3 vendor/Nova_Lang/novalang.py tools/calc_cli.nova savings 10000 500 7 30
+#   python3 vendor/Nova_Lang/novalang.py tools/calc_cli.nova refinance 200000 6.5 360 1264.14 5.0 360 6000
 
-import "../src/app/amortization_screen.nova" as screen
+import "../src/app/amortization_screen.nova" as amortization
+import "../src/app/savings_screen.nova" as savings
+import "../src/app/refinance_screen.nova" as refinance
 
 let given = args()
-if len(given) != 4 {
-    throw("usage: calc_cli.nova <principal> <annual rate %> <months> <extra per month>")
+if len(given) == 0 {
+    throw("usage: calc_cli.nova <amortization|savings|refinance> <inputs as typed...>")
 }
-print(json.dumps(screen.calculate(given[0], given[1], given[2], given[3])))
+let screen = given[0]
+let inputs = given[1:]
+if screen == "amortization" and len(inputs) == 4 {
+    print(json.dumps(amortization.calculate(inputs[0], inputs[1], inputs[2], inputs[3])))
+} else if screen == "savings" and len(inputs) == 4 {
+    print(json.dumps(savings.calculate(inputs[0], inputs[1], inputs[2], inputs[3])))
+} else if screen == "refinance" and len(inputs) == 7 {
+    print(json.dumps(refinance.calculate(inputs[0], inputs[1], inputs[2], inputs[3], inputs[4], inputs[5], inputs[6])))
+} else {
+    throw("calc_cli.nova: unknown screen or wrong number of inputs: " + str(given))
+}

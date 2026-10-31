@@ -137,11 +137,17 @@ def shape_whole(flows) {
     for flow in flows {
         coeffs[flow.period] = coeffs[flow.period] + flow.amount.minor
     }
+    return shape_of_coeffs(coeffs, flows[0].amount)
+}
+
+# coeffs (minor units for periods 0..last) -> the shape; see shape_whole.
+def shape_of_coeffs(coeffs, unit) {
+    let last = len(coeffs) - 1
     let runs = []
     let walk = {start: 0, previous_sign: 0, changes: 0}
-    for j = 0 to shape.last {
+    for j = 0 to last {
         let c = coeffs[j]
-        if j == shape.last or coeffs[j + 1] != c {
+        if j == last or coeffs[j + 1] != c {
             if c != 0 {
                 append(runs, [walk.start, j, c])
                 if walk.previous_sign != 0 and sign(c) != walk.previous_sign {
@@ -152,7 +158,7 @@ def shape_whole(flows) {
             walk["start"] = j + 1
         }
     }
-    return {unit: flows[0].amount, last: shape.last, coeffs: coeffs, runs: runs, changes: walk.changes}
+    return {unit: unit, last: last, coeffs: coeffs, runs: runs, changes: walk.changes}
 }
 
 # N = sum_j c_j * D^j * G^(K - j) at r = numerator / (den * MICRO), exactly.
@@ -653,4 +659,31 @@ export def xirr(dated_flows) {
         previous["k"] = k
     }
     throw("cashflow: no XIRR between -99.99% and 1,048,576% a year")
+}
+
+# The IRR per period of an amortization.schedule_table() table, as the
+# borrower sees it (principal received at period 0, each payment paid), on
+# the unchecked core: the polynomial is built straight from the table's int
+# rows, with no flow dicts. `guess` is a rate {num, den} expected to be
+# within a micro-unit of the answer - normally the loan's own rate; bisection
+# then starts from a 3-micro-unit bracket around it (about 22 steps instead of
+# 32). If the guess does not bracket the root, the full V = 1 search runs, so a
+# bad guess costs time, never correctness. The table MUST come from
+# schedule_table(), which validated every amount.
+export def table_irr(table, guess) {
+    let coeffs = [table.principal]
+    for r in table.rows {
+        append(coeffs, 0 - r[1])
+    }
+    let shape = shape_of_coeffs(coeffs, {minor: 0, scale: table.scale, currency: table.currency})
+    rates.check_rate(guess)
+    let centre = guess.num // guess.den
+    let lo = centre - 1
+    let hi = centre + 2
+    let s_lo = residual_sign(shape, lo, 1)
+    let s_hi = residual_sign(shape, hi, 1)
+    if shape.changes == 1 and s_lo != 0 and s_hi != 0 and s_lo != s_hi {
+        return min_nonneg(verified(shape, [bisect(shape, lo, hi, s_lo)]))
+    }
+    return min_nonneg(irr_of_shape(shape))
 }

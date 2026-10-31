@@ -18,7 +18,7 @@ from src.host import app  # noqa: E402
 class CsvExportTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.result = app.calculate("200,000.00", "6.5", "360", "0")
+        cls.result = app.calculate("amortization", "200,000.00", "6.5", "360", "0")
         buffer = io.StringIO()
         app.export_csv(cls.result, buffer)
         cls.text = buffer.getvalue()
@@ -41,6 +41,42 @@ class CsvExportTest(unittest.TestCase):
     def test_no_thousands_separators_in_csv(self):
         self.assertNotIn(",", "".join(self.rows[1][1:]))
         self.assertEqual(self.rows[1][4], "199819.19")
+
+
+class RefinanceCsvTest(unittest.TestCase):
+    """One row per scenario (keep vs refinance), not one row per month."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.result = app.calculate("refinance", "200,000.00", "6.5", "360", "1,264.14", "5.0", "360", "6,000")
+        buffer = io.StringIO()
+        app.export_csv(cls.result, buffer)
+        cls.rows = list(csv.reader(io.StringIO(buffer.getvalue())))
+
+    def test_header_and_one_row_per_scenario(self):
+        self.assertEqual(self.rows[0], ["scenario", "monthly_payment", "total_paid", "total_interest", "payoff_month", "closing_costs"])
+        self.assertEqual([row[0] for row in self.rows[1:]], ["Keep current loan", "Refinance"])
+
+    def test_known_values(self):
+        self.assertEqual(self.rows[2][1], "1073.64")     # the new payment
+        self.assertEqual(self.rows[2][5], "6000.00")     # closing costs
+        self.assertEqual(self.rows[1][4], "360")         # a count, not money
+
+    def test_reparses_to_the_same_rows(self):
+        kinds = self.result["column_kinds"]
+        parsed = [[value if kind == "text" else int(value.replace(".", "")) for value, kind in zip(row, kinds)] for row in self.rows[1:]]
+        self.assertEqual(parsed, self.result["rows"])
+
+
+class SavingsCsvTest(unittest.TestCase):
+    def test_one_row_per_year(self):
+        result = app.calculate("savings", "10,000.00", "500", "7", "30")
+        buffer = io.StringIO()
+        app.export_csv(result, buffer)
+        rows = list(csv.reader(io.StringIO(buffer.getvalue())))
+        self.assertEqual(rows[0], ["year", "contributed", "interest_earned", "balance"])
+        self.assertEqual(len(rows), 31)
+        self.assertEqual(rows[30][3], "691150.47")
 
 
 if __name__ == "__main__":

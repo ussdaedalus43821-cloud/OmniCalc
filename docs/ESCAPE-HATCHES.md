@@ -35,7 +35,7 @@ Each is tracked here so it isn't forgotten. None is built yet, and none has a pa
 - **Reason:** the NovaLang Budan search costs O(K²) per root count. Measured: 120 ms at 30
   periods and 271 ms at 60. It refuses more than 60 periods, with an error that points here.
   Real cases (options, private equity, irregular working capital) are rare.
-- **Status:** not built; the parity test is deferred to the M4 host (the bridge now exists).
+- **Status:** not built. **Target: M6.**
 - **Date added:** 2026-10-31.
 
 ### XIRR with more than one sign change
@@ -47,7 +47,7 @@ Each is tracked here so it isn't forgotten. None is built yet, and none has a pa
 - **Reason:** Budan's theorem needs a polynomial of manageable degree. With dated flows the
   exponents are day counts, so the degree is the number of days (thousands). A 5 bp grid of
   float XNPV evaluations would cost seconds in NovaLang.
-- **Status:** not built.
+- **Status:** not built. **Target: M6.**
 - **Date added:** 2026-10-31.
 
 ## Decisions to keep in NovaLang (no escape hatch)
@@ -144,6 +144,28 @@ These were checked against the budget and stay in NovaLang. Re-measure if inputs
   2. The end-to-end mortgage path (88.7 ms) leaves little headroom. If it grows, the first tool
      is the unchecked-core pattern: per-flow validation in `normalize` and `from_schedule` repeats
      checks the schedule already did.
+
+### Pre-M5 optimizations — `schedule_table` + `table_irr` (2026-10-31)
+- Amortization screen `calculate` in NovaLang: **56.7 → 40.5 ms**.
+  - `schedule_table` (the int-row core) takes the schedule from 25.8 to 19.7 ms by skipping 2,880
+    money dicts per call.
+  - `table_irr` takes the IRR from 20.9 to 12.4 ms. It builds coefficients straight from the
+    rows and starts from a 3-micro-unit bracket around the loan rate, so about 22 bisection
+    steps instead of 32.
+
+### M5 screens: calculate-path medians (2026-10-31)
+- Measured headless through the bridge (`tools/perf.py`, 20 runs after a warm-up), and in the GUI
+  (Python 3.12 + Tk under Xvfb, 20 presses each, including drawing the table):
+
+  | Screen | Headless median / p90 | GUI median / p90 / max |
+  |---|---|---|
+  | Amortization | 43.0 / 57.4 ms | 50.9 / 72.6 / 88.2 ms |
+  | Savings (30 yearly `tvm.fv` calls) | 14.9 / 15.5 ms | 19.5 / 21.1 / 25.7 ms |
+  | **Refinance** (two schedules + break-even scan) | **54.8 / 58.4 ms** | **62.2 / 80.7 / 107.6 ms** |
+
+- Every median is under the 70 ms M5 target, so no new unchecked core was needed. Refinance is the
+  most expensive handler and the closest to the target. If it grows, the next lever is that
+  `compare` only needs each schedule's payment column, not the full table.
 
 ## Known approximations
 

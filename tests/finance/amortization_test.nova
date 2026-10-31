@@ -1,5 +1,5 @@
 # module: amortization
-# expect: 49
+# expect: 53
 #
 # Reference values come from tests/finance/gen_amortization_vectors.py, a
 # separate Python (fractions.Fraction) implementation of the rules in
@@ -139,5 +139,25 @@ def mixed_currency() { am.schedule(loan, monthly_65, 360, money.make(126414, 2, 
 t.check_throws("mixed currencies", mixed_currency, "same currency and scale")
 def biweekly_no_months() { am.schedule_biweekly(loan, biweekly_65, 0, payment) }
 t.check_throws("biweekly with 0 months", biweekly_no_months, "n must be at least 1")
+
+# ---- 8. the unchecked core's compact table (pre-M5) agrees with the money rows ----
+def table_matches(table, schedule) {
+    let bad = {count: 0}
+    for i = 0 to len(schedule.rows) - 1 {
+        let row = schedule.rows[i]
+        let want = [row.period, row.payment.minor, row.interest.minor, row.principal.minor, row.balance.minor, row.regular.minor, row.extra.minor, row.adjustment.minor]
+        if table.rows[i] != want {
+            bad["count"] = bad.count + 1
+        }
+    }
+    return bad.count
+}
+let canonical_table = am.schedule_table(loan, monthly_65, 360, payment, ZERO, [])
+t.check("schedule_table: same rows as schedule (canonical)", table_matches(canonical_table, canonical), 0)
+t.check("schedule_table: same totals", [canonical_table.total_paid, canonical_table.total_interest, canonical_table.payoff_period, canonical_table.principal], [45508582, 25508582, 360, 20000000])
+let lumped_table = am.schedule_table(loan, monthly_65, 360, payment, ZERO, [{period: 12, amount: usd(1000000)}, {period: 60, amount: usd(1000000)}])
+t.check("schedule_table: same rows as schedule_with_extra (lump sums)", [table_matches(lumped_table, lumped), len(lumped_table.rows)], [0, 286])
+def table_negative_amortization() { am.schedule_table(loan, monthly_65, 360, usd(100000), ZERO, []) }
+t.check_throws("schedule_table: checks its inputs like schedule_with_extra", table_negative_amortization, "negative amortization")
 
 t.finish()
