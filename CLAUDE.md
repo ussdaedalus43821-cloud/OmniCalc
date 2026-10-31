@@ -74,6 +74,19 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
   `_whole` form only in hot loops whose operands are ints already validated upstream
   (amortization). Anywhere else, use the checked form.
 
+## Hot-loop primitives: unchecked core + checked wrapper
+- A primitive that runs inside a hot loop comes in two forms:
+  - a **checked public wrapper** that validates its inputs and then delegates;
+  - an **unchecked core** (suffix `_whole`, or another name stated in its comment) that holds
+    the arithmetic and assumes valid inputs.
+- **The checked wrapper carries the validation tests. The unchecked core carries the arithmetic
+  tests,** including a test that both forms agree. The core may only be called from code that
+  has already validated those exact operands.
+- When a module approaches the 100 ms budget, reach for this pattern **before** an escape hatch.
+- Primitives in this pattern:
+  - `money.round_half_up` (checked) / `money.round_half_up_whole` (unchecked core, used by
+    `amortization.nova`).
+
 ## Solver rules
 - **Sign convention.** Cash received is positive and cash paid out is negative. A loan you take
   out has `pv > 0` and `pmt < 0`; a savings plan has `pmt < 0` and `fv > 0`.
@@ -119,10 +132,65 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
 - **Dates**: add-months with end-of-month clamping, 30/360, actual/365, actual/actual, and
   schedule generation all live in NovaLang.
 
+## IRR scan strategy (`src/finance/cashflow.nova`) — written before coding, revised after measuring (M3)
+- **Measured first.** The brief's blind 5 bp grid over [−99%, +100%] is 3,981 exact residual
+  evaluations:
+  - **540 ms even for a 2-period flow**;
+  - for a 360-period flow, plain Horner costs 4.1 ms per evaluation, so about 16 s for the grid.
+  A cell-by-cell grid can't meet the 100 ms budget.
+- **The domain.** NPV is the polynomial `P(x) = Σ c_j x^j` in `x = 1/(1+r)`, whose coefficients
+  are the flows in period order.
+- **Descartes' rule of signs.** With `V` sign changes among the non-zero flows, the number of
+  roots with r > −100% is at most `V` and has the same parity as `V`.
+- **`V = 0`:** no root. `irr` returns `[]` without searching.
+- **`V = 1`:** exactly one root, so the search is fast and complete.
+  - Bracket by walking outward from 0 with `tvm.rate`'s candidate lists
+    (−99.99% … 1,048,576%), then bisect exactly.
+  - This covers every conventional loan and investment, including `from_schedule`.
+- **`V ≥ 2`: the same 5 bp grid over [−99%, +100%), searched by Budan's theorem** instead of
+  cell by cell.
+  - The number of roots in `(a, b]` is at most `V(a) − V(b)`, with the same parity, where
+    `V(c)` counts sign changes in the coefficients of `P(x + c)`. A grid point
+    `x_i = 2000 / (2000 + i)` is shifted in exactly with integer Horner.
+  - Split the grid-index range recursively, keeping each piece whose bound is ≥ 1:
+    - a bound of 0 means no root, so skip the piece;
+    - a bound of 1 means one root, so bisect it exactly;
+    - a single 5 bp cell bisects whatever sign change it shows.
+    Bounds are memoized per grid point.
+  - **Guarantee:** every root that's alone in its 5 bp cell is found, so any two roots at least
+    10 bp apart are always both found. A test pins 10% and 10.1%.
+  - **Not found:** roots outside [−99%, +100%), an even number of roots in one cell, and
+    double roots.
+  - **Cost bound:** `O(K²)` integer steps per Budan count, with about 2 × log₂(3,980) ≈ 25
+    counts for two roots. Measured: 15 ms at 2 periods, 85 ms at 20, 120 ms at 30.
+  - **Hard cap:** V ≥ 2 flows over **60 periods** (about 270 ms) are refused with an error.
+    Over-budget cases are listed in `docs/ESCAPE-HATCHES.md`.
+- **Exact evaluation.**
+  - With `r = num / D`, `D = den × MICRO`, `G = D + num`: `NPV = N / G^K` where
+    `N = Σ c_j · D^j · G^(K−j)`, and `G^K > 0`.
+  - **Runs of equal consecutive flows are compressed** into one closed-form term,
+    `c · D^a · G^(K−b) · (G^m − D^m) / (G − D)` with `m = b − a + 1` (and `m · D^K` when
+    `G = D`). The division is exact. A 360-row schedule is about 3 runs.
+- **Bisection and verification.** The pattern is `tvm.rate`'s (power-of-two denominators, at
+  most 200 steps), but it stops only when **both** the width is ≤ 1e-12 per period **and** the NPV
+  at the midpoint is within one minor unit of 0. At scale 6, a 360-period schedule needs about
+  1e-14. Roots are `{num, den}` per period, sorted ascending, and not rounded.
+- **No shared root-finder yet.** `cashflow.nova` copies `tvm.rate`'s candidates and bisection.
+  Extract a shared one when a third user appears.
+- **What schedule round-trips can promise.** A cent schedule's IRR is **not** exactly its loan
+  rate: per-period interest rounding moves it by 1.19e-9 (−3.68 cents over 360 rows). The test
+  therefore checks two things:
+  - at cents, the IRR against the exact reference within 1e-12;
+  - at scale 6, the IRR back to the loan rate within 1e-9.
+
 ## Amortization rules (`src/finance/amortization.nova`)
 - **Magnitudes, not signed cash flows.** Principal, payment, extra and lump sums are positive
   money, and rows report positive amounts. To use a TVM payment, which is negative, pass
   `money.negate(tvm.pmt(...))`.
+- **A schedule is for display, not cash-flow analysis.** For NPV or IRR, convert it with
+  `cashflow.from_schedule(schedule)`: principal `+` at period 0, each row's payment `−`, from the
+  borrower's view. It is the **only** place a schedule's signs flip, and it is tested end to end
+  against IRR.
 - **Rate per period**, exactly as supplied. The same rule as TVM.
 - **Each period:** `interest = balance × rate`, rounded half-up once; then
   `scheduled = regular + extra + lump`.
@@ -197,7 +265,8 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
 - src/host/nova_runtime.py — loads the pinned interpreter, startup version + commit assertion
 - src/core/numbers.nova, money.nova, rates.nova, dates.nova — foundation (M0, numbers.nova in M1)
 - src/core/math — scientific, units, algebra hooks
-- src/finance/tvm — PV/FV/PMT/N/IY, NPV/IRR
+- src/finance/tvm.nova — PV/FV/PMT/N/rate (M1)
+- src/finance/cashflow.nova — NPV, IRR, payback, from_schedule (M3)
 - src/finance/amortization.nova — schedules, extra payments, biweekly (M2); refinance later
 - src/finance/investments — compound interest (v1); CAGR, DCA, retirement (later)
 - src/finance/business — margin, break-even, ROI, depreciation (post-v1)
@@ -229,15 +298,22 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
     `tests/finance/gen_tvm_vectors.py`.
   - CI: `.github/workflows/tests.yml`.
   - NPV/IRR are deferred to M3.
-- **M2 — Amortization schedules only.** 🚧 in progress, awaiting review.
+- **M2 — Amortization schedules only.** ✅ done, reviewed.
   - `src/finance/amortization.nova`: `schedule`, `schedule_with_extra`, `schedule_biweekly`.
   - Tests: `tests/finance/amortization_test.nova`, with Python vectors from
     `tests/finance/gen_amortization_vectors.py` and a row-by-row diff against
     `tests/finance/vectors/mortgage_200k_6_5_360.json`.
   - Not in M2: refinance, rent-vs-buy, extra-payment comparison logic.
-- **M3 — NPV/IRR and uneven cash flows.**
+- **M3 — NPV/IRR and uneven cash flows.** 🚧 in progress, awaiting review.
+  - `src/finance/cashflow.nova`: `npv`, `irr` (all roots found), `irr_min_positive`, `payback`
+    (undiscounted, linearly interpolated), and `from_schedule`.
+  - Tests: `tests/finance/cashflow_test.nova`, with Python vectors from
+    `tests/finance/gen_cashflow_vectors.py`.
+  - Not in M3: XNPV/XIRR, which need dated flows.
+- **M4 — XNPV/XIRR, dates-based cash flows, and the start of the UI host.**
 - **Later — compound interest** (`investments`).
-- **M4 — Scientific + units** (`core/math`).
-- **M5 — Tkinter host:** screens with formula/assumptions, CSV export, terminal debug harness.
+- **Later — Scientific + units** (`core/math`).
+- **Later — the full Tkinter host:** screens with formula/assumptions, CSV export, a terminal debug
+  harness.
 - **CI** (`.github/workflows/tests.yml`): `tools/run_tests.py` on every push and PR, plus a nightly
   `--bootstrap` job (cron, 07:17 UTC).

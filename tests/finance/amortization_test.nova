@@ -96,6 +96,9 @@ t.check("lumps: two in one period add up", halved_lumps.totals, lumped.totals)
 # ---- 5. biweekly: 6.5%/26 per period, half of 1,264.14 ----
 let biweekly = am.schedule_biweekly(loan, biweekly_65, 360, payment)
 t.check("biweekly: half payment", biweekly.rows[0].regular, usd(63207))
+# Keep this odd-payment case: 126,414 is even, so halving it never rounds,
+# and a mutation that floored the half instead of rounding it half-up went
+# undetected until this check was added (M2). Don't "simplify" it away.
 t.check("biweekly: an odd payment's half rounds half-up", am.schedule_biweekly(loan, biweekly_65, 360, usd(126415)).rows[0].regular, usd(63208))
 t.check("biweekly: pays off at period 628", biweekly.totals.payoff_period, 628)
 t.check("biweekly: total interest", biweekly.totals.total_interest, usd(19633936))

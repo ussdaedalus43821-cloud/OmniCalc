@@ -1,6 +1,9 @@
 # src/finance/amortization.nova - loan amortization schedules.
 #
 # ---- Conventions ----
+# A schedule returns DISPLAY amounts, not cash flows. Use
+#   cashflow.from_schedule(schedule) (src/finance/cashflow.nova) for any
+#   cash-flow analysis (NPV, IRR): it is the one place the signs flip.
 # Amounts here are MAGNITUDES, not TVM-signed cash flows: principal,
 #   payment, extra and lump sums are all positive money, and every row
 #   reports positive amounts. To use a payment from tvm.pmt() (which is

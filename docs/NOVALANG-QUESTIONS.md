@@ -49,7 +49,8 @@ on NaN/inf. `try`/`catch` can't intercept it.
 Filed as https://github.com/ussdaedalus43821-cloud/Nova_Lang/issues/3. OmniCalc works around it
 with `src/core/numbers.nova`, which rejects non-finite values before calling `floor()`.
 
-## Documentation discrepancy found in M2 (not yet reported)
-`Nova_Lang/README.md` "Language syntax" says `for i = 0 to 10 { print(i) }` "counts 0..9", but
+Third issue: `README.md` "Language syntax" says `for i = 0 to 10 { print(i) }` "counts 0..9", but
 the bound is **inclusive**: `for i = 0 to 3` visits 0, 1, 2, 3 (verified, and `step`/`downto`
-too). `range(n)` *is* exclusive. OmniCalc's rule is in `CLAUDE.md`.
+too). `range(n)` *is* exclusive. The issue suggests fixing the docs rather than the runtime.
+Filed as https://github.com/ussdaedalus43821-cloud/Nova_Lang/issues/4. OmniCalc's rule is in
+`CLAUDE.md` ("Known gaps and traps").

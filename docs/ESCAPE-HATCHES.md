@@ -62,6 +62,33 @@ These were checked against the budget and stay in NovaLang. Re-measure if inputs
 - Decision: within the 100 ms budget, so it stays in NovaLang. Re-measure before adding
   longer schedules (e.g. weekly) or per-row features, because cost grows linearly with rows.
 
+### NPV / IRR — `src/finance/cashflow.nova` (M3, 2026-10-31)
+- Measured: 10 calls each, same setup as above.
+
+  | Case | Per call |
+  |---|---|
+  | **360-row mortgage: `from_schedule` + `irr_min_positive`** | **64.3 ms** |
+  | Same, with 105.34 extra/month and two 10,000 lump sums | 62.4 ms |
+  | Schedule + `from_schedule` + IRR, end to end | 88.7 ms |
+  | Multiple sign changes, 2 periods (two roots) | 14.8 ms |
+  | Multiple sign changes, 10 periods | 19.8 ms |
+  | Multiple sign changes, 20 periods | 85.4 ms |
+  | Multiple sign changes, 30 periods | **120.2 ms** (over budget) |
+  | Multiple sign changes, 60 periods (the cap) | **271.3 ms** (over budget) |
+
+- What was tried first: a plain 5 bp grid, one exact evaluation per cell, which is the brief's
+  suggestion. It took 540 ms even for 2 periods. Replacing it with Budan isolation over the same
+  grid cut that case to 15 ms (CLAUDE.md "IRR scan strategy").
+- **Decision: stays in NovaLang, with two open items for review.**
+  1. Multi-sign-change flows over about 25 periods exceed 100 ms (120 ms at 30 periods). The
+     search refuses more than 60 periods, so the worst case is about 0.3 s. If longer
+     multi-sign-change flows matter, the fix is a Python escape hatch for
+     `cashflow.irr`'s V ≥ 2 path, with a parity test. That's best built with the M4 host, which
+     brings the embedding a parity test needs.
+  2. The end-to-end mortgage path (88.7 ms) leaves little headroom. If it grows, the first tool
+     is the unchecked-core pattern: per-flow validation in `normalize` and `from_schedule` repeats
+     checks the schedule already did.
+
 ## Known approximations
 
 Behavior that is deliberately not exact. Each entry says what is approximated, why, and what to
