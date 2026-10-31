@@ -1,5 +1,5 @@
 # module: tvm
-# expect: 40
+# expect: 49
 #
 # Reference values come from tests/finance/gen_tvm_vectors.py: an independent
 # Python decimal (80-digit) implementation of the textbook closed forms, with
@@ -110,5 +110,23 @@ def fractional_n() { tvm.fv(loan, ZERO, 1.5, monthly_65) }
 t.check_throws("fractional n is rejected", fractional_n, "whole number")
 def no_payment_zero_rate() { tvm.n(loan, ZERO, ZERO, zero_rate) }
 t.check_throws("zero rate and zero payment has no n", no_payment_zero_rate, "zero rate with no payment")
+
+# ---- 7. added in M2 review: the periods rule and multiple roots ----
+# whole_periods: f = floor(exact); report f if exact - f < 1e-4, else f + 1.
+t.check("periods: an exact integer stays", tvm.whole_periods(120), 120)
+t.check("periods: 120.00005 is inside the slack", tvm.whole_periods(120.00005), 120)
+t.check("periods: 120.0002 is outside the slack", tvm.whole_periods(120.0002), 121)
+t.check("periods: 119.9999 rounds up", tvm.whole_periods(119.9999), 120)
+t.check("periods: never below 1", tvm.whole_periods(0.00001), 1)
+def periods_nan() { tvm.whole_periods(json.loads("NaN")) }
+t.check_throws("periods: NaN is rejected", periods_nan, "positive finite")
+
+# -100.00 now, +230.00 after one period, -132.00 after two: the residual
+# -100g^2 + 230g - 132 has roots g = 1.1 and g = 1.2, i.e. 10% and 20%.
+# rate() must return the smaller positive one.
+let two_root = tvm.rate(usd(-10000), usd(-36200), usd(23000), 2)
+t.check_true("two roots: returns 10% (within 1e-9)", rates_within(two_root, rates.annual(100000), 9))
+t.check("two roots: 20% is also a root", tvm.fv(usd(-10000), usd(23000), 2, rates.annual(200000)), usd(-36200))
+t.check("two roots: 10% reproduces the cash flows", tvm.fv(usd(-10000), usd(23000), 2, rates.annual(100000)), usd(-36200))
 
 t.finish()

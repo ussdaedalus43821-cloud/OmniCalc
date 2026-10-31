@@ -33,6 +33,9 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
     variable, parameter or function names.
   - There is no hoisting at top level: a function must be defined before top-level code calls
     it. Calls from inside function bodies can go to functions defined later.
+  - **`for i = a to b` is INCLUSIVE of `b`** (verified; `Nova_Lang/README.md` wrongly says
+    "counts 0..9" for `0 to 10`). `range(n)` is exclusive. To visit `n` items, write
+    `for i = 0 to n - 1` or `for i = 1 to n`.
 - If NovaLang cannot express a platform feature, isolate that feature behind a thin adapter and document it.
 - Prefer NovaLang for domain logic: math, finance, validation, and numeric formatting decisions
   (scale, rounding). The host turns the result into display strings.
@@ -66,6 +69,10 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
     minor units, unrounded.
   - `multiply_rate(a, rate)` is that same value rounded half-up once. Use it for **one cash
     flow**, never inside a solver.
+- **The one rounding rule** is written once, in `money.round_half_up_whole(n, d)`.
+  `money.round_half_up` validates its inputs and then delegates to it. Use the unchecked
+  `_whole` form only in hot loops whose operands are ints already validated upstream
+  (amortization). Anywhere else, use the checked form.
 
 ## Solver rules
 - **Sign convention.** Cash received is positive and cash paid out is negative. A loan you take
@@ -82,15 +89,21 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
 - **`tvm.fv` / `pv` / `pmt`:** exact closed forms, rounded half-up once, to a minor unit.
 - **`tvm.n`:** closed form through logarithms, in floats. At a zero rate it's `-(pv + fv) / pmt`.
   - Returns `{exact, periods}`. `exact` is the real-valued solution and is not rounded.
-    `periods` is `ceil(exact)`, except that an overshoot under 1e-4 of a period is ignored,
-    because that's how a target rounded to a minor unit shows up.
+    `periods` follows `tvm.whole_periods`: let `f = floor(exact)`; if `exact − f < 1e-4`,
+    report `f`, otherwise `f + 1`, and never below 1.
+  - **`periods` is a UI convenience, not a mathematical truth.** Financial logic must use
+    `exact`; no module may base decisions on `periods`. This is listed as a known approximation
+    in `docs/ESCAPE-HATCHES.md`.
   - No summation fallback: when the closed form has no positive solution, no `n` exists, and
     `n` throws.
 - **`tvm.rate`:** bisection on the exact residual's sign.
   - Bracket: walk outward from 0 and stop at the first sign change. Upward the candidates are
     0.1%/period doubling to about 1,048,576%; downward they're -0.1% doubling to -51.2%, then
-    -75%, -90%, -99%, -99.9%, -99.99%. The positive side is tried first, so with more than
-    one root the smallest positive one wins.
+    -75%, -90%, -99%, -99.9%, -99.99%. The positive side is tried first.
+  - **Multiple roots.** The **smallest positive root** is returned, matching Excel's RATE. A
+    test pins this: −100, +230, −132 has roots 10% and 20%, and `rate` must return 10%.
+    Known limit: two roots between the same pair of neighbouring candidates are missed. IRR
+    (M3) needs a finer scan.
   - Bisection runs over a power-of-two denominator and stops at a width of 1e-12 per period,
     capped at 200 iterations (a real case takes about 40–50).
   - The answer is returned as an exact `{num, den}` and is **not** rounded to a micro-unit;
@@ -105,6 +118,32 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
   - precision targets like "within 1e-9" are met at a scale fine enough for them (scale 6).
 - **Dates**: add-months with end-of-month clamping, 30/360, actual/365, actual/actual, and
   schedule generation all live in NovaLang.
+
+## Amortization rules (`src/finance/amortization.nova`)
+- **Magnitudes, not signed cash flows.** Principal, payment, extra and lump sums are positive
+  money, and rows report positive amounts. To use a TVM payment, which is negative, pass
+  `money.negate(tvm.pmt(...))`.
+- **Rate per period**, exactly as supplied. The same rule as TVM.
+- **Each period:** `interest = balance × rate`, rounded half-up once; then
+  `scheduled = regular + extra + lump`.
+- **Final-payment convention.** If `scheduled ≥ balance + interest`, or it's period `n`, that
+  row is the **final** row (`kind: "final"`). It pays exactly `balance + interest`, and the
+  difference is recorded in that row:
+  - `adjustment = paid − scheduled`. It is negative when the payment was adjusted down (a
+    rounded-up payment, or an early payoff) and positive when adjusted up (a rounded-down
+    payment falling short).
+  - It is never silently absorbed.
+  - Every row satisfies `payment == regular + extra + adjustment == interest + principal`.
+- **Biweekly** means 26 periods a year, each paying **half the monthly payment** (rounded
+  half-up), at the **rate per biweekly period the caller supplies** (normally
+  `rates.per_period(rates.annual(m), 26)`). It is never re-derived from a monthly rate. The cap
+  is `ceil(n_months × 26 / 12)` periods. At 6.5% a 30-year loan pays off in 628 periods
+  (24.15 years).
+- **Rejected loudly**, and each case has a test:
+  - principal ≤ 0, payment ≤ 0, extra < 0, n < 1, or mixed currencies;
+  - a lump sum that isn't positive, falls outside 1..n, or is malformed;
+  - **negative amortization**: payment + extra that doesn't exceed the first period's
+    interest.
 
 ## Performance rule
 - UI-path budget: **100 ms**, roughly 10k interpreter steps (interpreter speed is about 162k
@@ -159,7 +198,7 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
 - src/core/numbers.nova, money.nova, rates.nova, dates.nova — foundation (M0, numbers.nova in M1)
 - src/core/math — scientific, units, algebra hooks
 - src/finance/tvm — PV/FV/PMT/N/IY, NPV/IRR
-- src/finance/loans — amortization, extra payments, refinance
+- src/finance/amortization.nova — schedules, extra payments, biweekly (M2); refinance later
 - src/finance/investments — compound interest (v1); CAGR, DCA, retirement (later)
 - src/finance/business — margin, break-even, ROI, depreciation (post-v1)
 - src/ui — Tkinter calculator screens (host)
@@ -183,15 +222,21 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
     - `day_count_actual_365`, plus the helpers `is_leap_year` and `days_in_month`.
   - Other day-count conventions (30/360, actual/actual) land with the module that needs them.
   - `tools/run_tests.py` with the sentinel and count check, plus tests for all three modules.
-- **M1 — TVM only.** 🚧 in progress, awaiting review.
+- **M1 — TVM only.** ✅ done, reviewed.
   - `src/finance/tvm.nova`: `fv`, `pv`, `pmt`, `n`, `rate`.
   - `money.multiply_rate_exact` split, and `src/core/numbers.nova` (the NaN/Inf guard).
   - Tests: `tests/finance/tvm_test.nova`, with Python reference vectors from
     `tests/finance/gen_tvm_vectors.py`.
   - CI: `.github/workflows/tests.yml`.
-  - NPV/IRR are deferred to a later milestone.
-- **M2 — Loans:** amortization schedule, extra payments, refinance, schedule rows for CSV.
-- **M3 — Compound interest** (`investments`).
+  - NPV/IRR are deferred to M3.
+- **M2 — Amortization schedules only.** 🚧 in progress, awaiting review.
+  - `src/finance/amortization.nova`: `schedule`, `schedule_with_extra`, `schedule_biweekly`.
+  - Tests: `tests/finance/amortization_test.nova`, with Python vectors from
+    `tests/finance/gen_amortization_vectors.py` and a row-by-row diff against
+    `tests/finance/vectors/mortgage_200k_6_5_360.json`.
+  - Not in M2: refinance, rent-vs-buy, extra-payment comparison logic.
+- **M3 — NPV/IRR and uneven cash flows.**
+- **Later — compound interest** (`investments`).
 - **M4 — Scientific + units** (`core/math`).
 - **M5 — Tkinter host:** screens with formula/assumptions, CSV export, terminal debug harness.
 - **CI** (`.github/workflows/tests.yml`): `tools/run_tests.py` on every push and PR, plus a nightly

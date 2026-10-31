@@ -1,5 +1,5 @@
 # module: money
-# expect: 39
+# expect: 41
 #
 # Golden values for src/core/money.nova. Every expected value is a hand-checked
 # exact integer.
@@ -79,5 +79,16 @@ def make_inf() { money.make(json.loads("1e999"), 2, "USD") }
 t.check_throws("infinite minor is rejected", make_inf, "whole number")
 def multiply_nan() { money.multiply_int(usd, json.loads("NaN")) }
 t.check_throws("multiply_int rejects NaN", multiply_nan, "whole number")
+
+# ---- added in M2: the unchecked rounding core ----
+let pairs = [[5, 2], [-5, 2], [7, 3], [8, 3], [-8, 3], [1, -2], [0, 5], [1300000000000, 12000000], [-1300000000000, 12000000]]
+let mismatches = {count: 0}
+for pair in pairs {
+    if money.round_half_up_whole(pair[0], pair[1]) != money.round_half_up(pair[0], pair[1]) {
+        mismatches["count"] = mismatches.count + 1
+    }
+}
+t.check("round_half_up_whole agrees with round_half_up", mismatches.count, 0)
+t.check("round_half_up_whole: one month at 6.5% on 200,000.00", money.round_half_up_whole(1300000000000, 12000000), 108333)
 
 t.finish()

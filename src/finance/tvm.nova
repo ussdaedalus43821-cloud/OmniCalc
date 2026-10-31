@@ -31,6 +31,13 @@
 # rate: bisection on the exact residual - never on rounded minor units,
 #   which would make the residual a step function of the rate. See
 #   CLAUDE.md "Solver rules" for the bracket search, tolerance and checks.
+#   MULTIPLE ROOTS: unusual cash flows (an intermediate inflow, e.g. -100,
+#   +230, -132) can have more than one rate. rate() returns the SMALLEST
+#   POSITIVE root, the same convention as Excel's RATE: the bracket search
+#   walks upward from zero first and stops at the first sign change.
+#   Known limit: two roots between the same pair of neighbouring candidates
+#   (e.g. 10% and 12%, both between 6.4% and 12.8%) produce no sign change
+#   there and are missed. NPV/IRR (M3) needs a finer scan for this.
 
 import "../core/numbers.nova" as numbers
 import "../core/money.nova" as money
@@ -184,7 +191,7 @@ def bisect_rate(pv, fv, pmt, n) {
         return {num: bracket.exact, den: 1}
     }
     let state = {lo: bracket.lo, hi: bracket.hi, q: 1, s_lo: bracket.s_lo}
-    for i = 0 to MAX_BISECTIONS {
+    for i = 1 to MAX_BISECTIONS {
         if (state.hi - state.lo) * WIDTH_FACTOR <= state.q {
             return reduced(state.lo + state.hi, 2 * state.q)
         }
@@ -222,10 +229,10 @@ export def pmt(pv, fv, n, rate) {
     return result(unit, pmt_minor(pv.minor, fv.minor, require_periods(n, 1), require_rate(rate)))
 }
 
-# Returns {exact, periods}: `exact` is the real-valued solution (a float),
-# `periods` the whole number of periods needed, ceil(exact) except that an
-# overshoot under PERIOD_SLACK of a period is ignored - that is how a target
-# rounded to a minor unit shows up (e.g. 120.0000125 for a 120-period plan).
+# Returns {exact, periods}. `exact` is the real-valued solution (a float)
+# and is the only value financial logic may use. `periods` is a DISPLAY
+# convenience - see whole_periods() and docs/ESCAPE-HATCHES.md "Known
+# approximations".
 let PERIOD_SLACK = 0.0001
 
 export def n(pv, fv, pmt, rate) {
@@ -235,7 +242,26 @@ export def n(pv, fv, pmt, rate) {
     if exact <= 0 {
         throw("tvm: no positive number of periods solves these cash flows")
     }
-    return {exact: exact, periods: ceil(exact - PERIOD_SLACK)}
+    return {exact: exact, periods: whole_periods(exact)}
+}
+
+# The rule for n().periods, exactly: let f = floor(exact). If
+# exact - f < 1e-4, report f; otherwise report f + 1. The result is never
+# below 1. The slack absorbs a target rounded to a minor unit (a 120-period
+# savings plan solves to 120.0000125); it is not a mathematical truth.
+export def whole_periods(exact) {
+    if not numbers.is_finite(exact) or exact <= 0 {
+        throw("tvm: whole_periods needs a positive finite number, got " + str(exact))
+    }
+    let f = floor(exact)
+    let whole = f + 1
+    if exact - f < PERIOD_SLACK {
+        whole = f
+    }
+    if whole < 1 {
+        return 1
+    }
+    return whole
 }
 
 def n_exact(pv, fv, pmt, rate) {

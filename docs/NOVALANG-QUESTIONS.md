@@ -38,8 +38,18 @@ The facts below come from `ussdaedalus43821-cloud/Nova_Lang` at commit `02eabdb`
 | 10 | v1 scope | **Resolved** | Scientific, units, TVM, amortization, compound interest, amortization CSV export. No tax in v1. |
 | 11 | Performance | **Resolved** | NovaLang everywhere except documented heavy jobs. UI-path budget: 100 ms / about 10k interpreter steps. Anything over that moves to Python behind the same interface, with a parity test against the NovaLang version. |
 
-## Upstream issue (reported; do not patch the submodule)
+## Upstream issues (reported; do not patch the submodule)
 `Nova_Lang/examples/stdlib_full_test.nova`: the failure-report branch calls `len(state["checks"])`
 on a number, so the summary crashes if any check fails.
 Filed as https://github.com/ussdaedalus43821-cloud/Nova_Lang/issues/2. OmniCalc is unaffected
 because it uses its own `TESTS_OK` sentinel (`tools/check.nova`, `tools/run_tests.py`).
+
+Second issue: `floor()`, `ceil()` and `round()` raise a raw Python `ValueError`/`OverflowError`
+on NaN/inf. `try`/`catch` can't intercept it.
+Filed as https://github.com/ussdaedalus43821-cloud/Nova_Lang/issues/3. OmniCalc works around it
+with `src/core/numbers.nova`, which rejects non-finite values before calling `floor()`.
+
+## Documentation discrepancy found in M2 (not yet reported)
+`Nova_Lang/README.md` "Language syntax" says `for i = 0 to 10 { print(i) }` "counts 0..9", but
+the bound is **inclusive**: `for i = 0 to 3` visits 0, 1, 2, 3 (verified, and `step`/`downto`
+too). `range(n)` *is* exclusive. OmniCalc's rule is in `CLAUDE.md`.
