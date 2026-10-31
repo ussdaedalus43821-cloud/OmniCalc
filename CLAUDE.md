@@ -13,16 +13,32 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
   (`Nova_Lang/README.md` "Quick start", "Self-hosting"). The host embeds it through the `Nova` class
   (`README.md` "Embedding NovaLang in Python").
 - Build command: **none.** NovaLang has no build step.
-- Test command: `python3 tools/run_tests.py` (created in M0).
-  Nightly CI only: `python3 tools/run_tests.py --bootstrap`.
+- Test command: `python3 tools/run_tests.py` (runs the pin check, then every `tests/**/*.nova`).
+  Nightly CI only: `python3 tools/run_tests.py --bootstrap` (about 50x slower; the dates test
+  takes about 50 s).
 - Formatter/linter: **none exists** (`novalang.py:4154`, `--bootstrap` is the only flag).
   Follow `Nova_Lang/CONTRIBUTING.md` "Style" by hand.
-- Do NOT invent NovaLang syntax or stdlib. Cite docs/examples. Known gaps: no `**` (use `pow()`),
-  no bitwise ops, `round()` is float half-even (don't use it for money).
+- Do NOT invent NovaLang syntax or stdlib. Cite docs/examples. Known gaps and traps:
+  - There is no `**` operator (use `pow()`), no bitwise ops, and no `null` literal.
+  - `round()` is float half-even; never use it for money.
+  - `/` returns a float when the division is inexact (`novalang.py:3258-3265`). Integer code uses
+    only `+ - * // %`; `//` floors (`novalang.py:3266-3269`).
+  - `type()` reports `"number"` for both ints and floats, so whole-number checks use
+    `floor(x) == x`.
+  - Built-in names (`min`, `max`, `sum`, `copy`, `remove`, `set`, `get`, ...) and keywords (`to`,
+    `step`, `in`, `with`, `as`, `delete`) can't be used as variable or function names.
 - If NovaLang cannot express a platform feature, isolate that feature behind a thin adapter and document it.
 - Prefer NovaLang for domain logic: math, finance, validation, and numeric formatting decisions
   (scale, rounding). The host turns the result into display strings.
 - Use host-platform glue only when NovaLang has no supported path.
+
+## Money contract (the formatting boundary)
+- Every NovaLang money value is `{minor: <int>, scale: <int>, currency: "<code>"}`, built and
+  checked by `src/core/money.nova`. For example, `{minor: 1999, scale: 2, currency: "USD"}` is
+  19.99 USD.
+- The host's **only** formatting job is `minor` + `scale` + `currency` → display string. It
+  never rounds, scales, converts, or does arithmetic on money. Any rounding the display needs
+  is done in NovaLang first.
 
 ## Host / NovaLang boundary
 | Python host owns | NovaLang owns |
@@ -50,13 +66,33 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
 - A calculator over budget (e.g. Monte Carlo, large IRR searches, bulk jobs) moves to Python behind
   the same interface. It must have a **parity test** against the NovaLang version and be listed in
   `docs/ESCAPE-HATCHES.md`.
+- Every `docs/ESCAPE-HATCHES.md` entry must name all of: the **Python module**, the **NovaLang
+  interface** it replaces (file + exported functions), and the **parity test file**. An entry
+  missing any of these is invalid. An unlisted escape hatch is a bug.
 
 ## Testing rules
-- Tests are `tests/**/*.nova` using `check(label, actual, expected)`.
-- Each test file ends with a guarded sentinel `print("TESTS_OK " + str(state["checks"]))` and never
-  calls `len()` on the count.
-- `tools/run_tests.py` runs every test file and fails on any of: non-zero exit, a missing sentinel,
-  or a sentinel count that differs from the file's declared expected count.
+- Tests are `tests/**/*.nova`. Every `.nova` file under `tests/` is a test; shared helpers live
+  in `tools/`.
+- Tests import `tools/check.nova` (`check`, `check_true`, `check_throws`) and end with
+  `t.finish()`. `finish()` prints the sentinel `TESTS_OK <n>` only when every check passed;
+  otherwise it prints the failures and exits 1. The count is printed with `str()`, never
+  `len()`.
+- Every test file starts with a header comment block containing both of:
+  ```
+  # module: money
+  # expect: 31
+  ```
+  `module` must name exactly one `src/**/<module>.nova`. `expect` is the exact number of checks
+  the file runs. Both may share one line.
+- **Fail closed.** `tools/run_tests.py` fails a file on any of:
+  - a missing, duplicate or malformed `module` or `expect` header;
+  - a module name that doesn't resolve to exactly one file;
+  - a non-zero exit or a timeout;
+  - anything other than exactly one `TESTS_OK <n>`, as the last line of output;
+  - `n` ≠ `expect`.
+  Finding no test files at all is also a failure. Nothing is skipped.
+- The runner first calls `src/host/nova_runtime.assert_pinned()`. It checks that the
+  interpreter reports `__version__ == "1.1.0"` and that the submodule HEAD is `02eabdb...`.
 - Tests run on every change. `--bootstrap` is a separate nightly CI job, not a gate.
 - All core finance math must have deterministic golden tests with known values (`tests/finance`).
 
@@ -73,6 +109,7 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
 
 ## Architecture
 - vendor/Nova_Lang — pinned submodule (read-only)
+- src/host/nova_runtime.py — loads the pinned interpreter, startup version + commit assertion
 - src/core/money.nova, rates.nova, dates.nova — foundation (M0)
 - src/core/math — scientific, units, algebra hooks
 - src/finance/tvm — PV/FV/PMT/N/IY, NPV/IRR
@@ -82,15 +119,23 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
 - src/ui — Tkinter calculator screens (host)
 - src/storage — presets, scenarios, local DB (post-v1)
 - src/export — CSV (v1, host); PDF (post-v1)
-- tools/run_tests.py — test runner
+- tools/run_tests.py — test runner; tools/check.nova — check() helper and sentinel
 - tests/core, tests/finance — golden test vectors
 
 ## Milestones
-- **M0 — Foundation only. No calculator modules.**
+- **M0 — Foundation only. No calculator modules.** ✅ done, awaiting review
   - Add the submodule at `02eabdb` and the version assertion.
-  - `money.nova`: minor units, scale, half-up rounding.
-  - `rates.nova`: micro-unit rates, periodic rates with carried remainder.
-  - `dates.nova`: serial days, add-months with EOM clamp, the three day-count conventions.
+  - `money.nova` (API surface only):
+    - `make`, `add`, `subtract`, `negate`, `multiply_int`, `multiply_rate`, `compare`;
+    - `round_half_up`, which rounds halves away from zero.
+  - `rates.nova` (API surface only):
+    - `annual(micro)`, `per_period` (the remainder is carried as an exact `{num, den}`);
+    - `micro_whole`, `micro_remainder`, `check_rate`. Nothing here rounds.
+  - `dates.nova` (API surface only):
+    - `from_civil`, `from_serial`, `check_date`, `add_days`, `days_between`;
+    - `add_months` (clamps to month-end, and the clamp doesn't stick);
+    - `day_count_actual_365`, plus the helpers `is_leap_year` and `days_in_month`.
+  - Other day-count conventions (30/360, actual/actual) land with the module that needs them.
   - `tools/run_tests.py` with the sentinel and count check, plus tests for all three modules.
 - **M1 — TVM:** PV/FV/PMT/N/rate, solve-for-any, NPV/IRR, golden vectors.
 - **M2 — Loans:** amortization schedule, extra payments, refinance, schedule rows for CSV.

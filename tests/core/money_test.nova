@@ -1,0 +1,68 @@
+# module: money
+# expect: 31
+#
+# Golden values for src/core/money.nova. Every expected value is a hand-checked
+# exact integer.
+
+import "../../tools/check.nova" as t
+import "../../src/core/money.nova" as money
+import "../../src/core/rates.nova" as rates
+
+let usd = money.make(1999, 2, "USD")
+let one_cent = money.make(1, 2, "USD")
+let eur = money.make(1999, 2, "EUR")
+let usd_mills = money.make(19990, 3, "USD")
+
+# ---- the {minor, scale, currency} struct ----
+t.check("make builds the struct", usd, {minor: 1999, scale: 2, currency: "USD"})
+t.check("whole-valued float normalizes to int", money.make(2.0, 2, "USD"), money.make(2, 2, "USD"))
+def make_fractional() { money.make(1.5, 2, "USD") }
+t.check_throws("fractional minor is rejected", make_fractional, "whole number")
+def make_negative_scale() { money.make(1, -1, "USD") }
+t.check_throws("negative scale is rejected", make_negative_scale, "scale")
+def make_no_currency() { money.make(1, 2, "") }
+t.check_throws("empty currency is rejected", make_no_currency, "currency")
+
+# ---- add / subtract / negate / multiply_int ----
+t.check("add", money.add(usd, one_cent), money.make(2000, 2, "USD"))
+t.check("subtract", money.subtract(usd, one_cent), money.make(1998, 2, "USD"))
+t.check("subtract below zero", money.subtract(one_cent, usd), money.make(-1998, 2, "USD"))
+t.check("negate", money.negate(usd), money.make(-1999, 2, "USD"))
+t.check("negate twice", money.negate(money.negate(usd)), usd)
+t.check("multiply_int", money.multiply_int(usd, 3), money.make(5997, 2, "USD"))
+t.check("multiply_int by a negative", money.multiply_int(usd, -2), money.make(-3998, 2, "USD"))
+t.check("ints are arbitrary precision", money.add(money.make(100000000000000000000, 2, "USD"), one_cent).minor, 100000000000000000001)
+def add_mixed_currency() { money.add(usd, eur) }
+t.check_throws("add refuses mixed currency", add_mixed_currency, "same currency and scale")
+def add_mixed_scale() { money.add(usd, usd_mills) }
+t.check_throws("add refuses mixed scale", add_mixed_scale, "same currency and scale")
+def multiply_fractional() { money.multiply_int(usd, 1.5) }
+t.check_throws("multiply_int refuses a fraction", multiply_fractional, "whole number")
+
+# ---- compare ----
+t.check("compare less", money.compare(one_cent, usd), -1)
+t.check("compare greater", money.compare(usd, one_cent), 1)
+t.check("compare equal", money.compare(usd, money.make(1999, 2, "USD")), 0)
+
+# ---- round_half_up: halves go away from zero ----
+t.check("5/2 rounds up to 3", money.round_half_up(5, 2), 3)
+t.check("-5/2 rounds to -3", money.round_half_up(-5, 2), -3)
+t.check("7/3 rounds down to 2", money.round_half_up(7, 3), 2)
+t.check("8/3 rounds up to 3", money.round_half_up(8, 3), 3)
+t.check("-8/3 rounds to -3", money.round_half_up(-8, 3), -3)
+t.check("negative denominator: 1/-2 rounds to -1", money.round_half_up(1, -2), -1)
+def round_by_zero() { money.round_half_up(1, 0) }
+t.check_throws("zero denominator is rejected", round_by_zero, "zero")
+
+# ---- multiply_rate: exact product, one rounding ----
+let principal = money.make(20000000, 2, "USD")
+let monthly = rates.per_period(rates.annual(65000), 12)
+# 200,000.00 * 0.065 / 12 = 1,083.3333... -> 1,083.33
+t.check("one month's interest at 6.5% on 200,000.00", money.multiply_rate(principal, monthly), money.make(108333, 2, "USD"))
+# Pre-rounding the monthly rate to 5416 micro-units would give 1,083.20.
+t.check("carried remainder beats a pre-rounded rate", money.multiply_rate(principal, rates.annual(5416)) == money.make(108320, 2, "USD"), true)
+t.check("exact half rounds away from zero", money.multiply_rate(money.make(100, 2, "USD"), rates.annual(5000)), money.make(1, 2, "USD"))
+t.check("negative exact half rounds away from zero", money.multiply_rate(money.make(-100, 2, "USD"), rates.annual(5000)), money.make(-1, 2, "USD"))
+t.check("zero rate gives zero", money.multiply_rate(principal, rates.annual(0)), money.make(0, 2, "USD"))
+
+t.finish()

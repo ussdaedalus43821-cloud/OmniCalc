@@ -38,6 +38,8 @@ The facts below come from `ussdaedalus43821-cloud/Nova_Lang` at commit `02eabdb`
 | 10 | v1 scope | **Resolved** | Scientific, units, TVM, amortization, compound interest, amortization CSV export. No tax in v1. |
 | 11 | Performance | **Resolved** | NovaLang everywhere except documented heavy jobs. UI-path budget: 100 ms / about 10k interpreter steps. Anything over that moves to Python behind the same interface, with a parity test against the NovaLang version. |
 
-## Upstream issue to report (do not patch the submodule)
-In `Nova_Lang/examples/stdlib_full_test.nova`, the failure-report branch calls
-`len(state["checks"])` on a number, so the summary errors if any check fails.
+## Upstream issue (reported; do not patch the submodule)
+`Nova_Lang/examples/stdlib_full_test.nova`: the failure-report branch calls `len(state["checks"])`
+on a number, so the summary crashes if any check fails.
+Filed as https://github.com/ussdaedalus43821-cloud/Nova_Lang/issues/2. OmniCalc is unaffected
+because it uses its own `TESTS_OK` sentinel (`tools/check.nova`, `tools/run_tests.py`).

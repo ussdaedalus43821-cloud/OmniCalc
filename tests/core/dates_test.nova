@@ -1,0 +1,76 @@
+# module: dates
+# expect: 48
+#
+# Golden values for src/core/dates.nova. The serials were taken from Python:
+# date(y, m, d).toordinal() - 719163.
+
+import "../../tools/check.nova" as t
+import "../../src/core/dates.nova" as dates
+
+# ---- serials against Python's calendar ----
+let golden = [
+    [1970, 1, 1, 0], [1969, 12, 31, -1], [2000, 2, 29, 11016], [1900, 3, 1, -25508],
+    [2024, 1, 31, 19753], [2024, 2, 29, 19782], [2100, 3, 1, 47541], [1, 1, 1, -719162],
+    [9999, 12, 31, 2932896], [2026, 10, 31, 20757]
+]
+for row in golden {
+    let label = str(row[0]) + "-" + str(row[1]) + "-" + str(row[2])
+    t.check("from_civil " + label, dates.from_civil(row[0], row[1], row[2]).serial, row[3])
+    t.check("from_serial " + label, dates.from_serial(row[3]), {y: row[0], m: row[1], d: row[2], serial: row[3]})
+}
+
+# ---- every serial in a wide range round-trips (one aggregate check) ----
+let roundtrip = {bad: 0}
+for serial = -800000 to 3000000 step 997 {
+    let date = dates.from_serial(serial)
+    if dates.from_civil(date.y, date.m, date.d).serial != serial {
+        roundtrip["bad"] = roundtrip["bad"] + 1
+    }
+}
+t.check("round trip over years 1-9999 (step 997)", roundtrip["bad"], 0)
+
+# ---- leap years and month lengths ----
+t.check("1900 is not a leap year", dates.is_leap_year(1900), false)
+t.check("2000 is a leap year", dates.is_leap_year(2000), true)
+t.check("2024 is a leap year", dates.is_leap_year(2024), true)
+t.check("February 2023 has 28 days", dates.days_in_month(2023, 2), 28)
+t.check("April has 30 days", dates.days_in_month(2024, 4), 30)
+
+# ---- add_months with end-of-month clamp ----
+let jan31 = dates.from_civil(2024, 1, 31)
+t.check("2024-01-31 + 1 month clamps to Feb 29", dates.add_months(jan31, 1), dates.from_civil(2024, 2, 29))
+t.check("2023-01-31 + 1 month clamps to Feb 28", dates.add_months(dates.from_civil(2023, 1, 31), 1), dates.from_civil(2023, 2, 28))
+t.check("2024-03-31 - 1 month clamps to Feb 29", dates.add_months(dates.from_civil(2024, 3, 31), -1), dates.from_civil(2024, 2, 29))
+t.check("2024-02-29 + 12 months clamps to Feb 28", dates.add_months(dates.from_civil(2024, 2, 29), 12), dates.from_civil(2025, 2, 28))
+t.check("clamp does not stick: +1 then +1 lands on Mar 29", dates.add_months(dates.add_months(jan31, 1), 1), dates.from_civil(2024, 3, 29))
+t.check("+2 in one step lands on Mar 31", dates.add_months(jan31, 2), dates.from_civil(2024, 3, 31))
+t.check("crossing a year end", dates.add_months(dates.from_civil(2024, 11, 15), 3), dates.from_civil(2025, 2, 15))
+t.check("going back across a year", dates.add_months(dates.from_civil(2024, 1, 15), -13), dates.from_civil(2022, 12, 15))
+t.check("adding zero months", dates.add_months(jan31, 0), jan31)
+
+# ---- add_days / days_between / actual/365 ----
+t.check("Feb 28 + 1 day in a leap year", dates.add_days(dates.from_civil(2024, 2, 28), 1), dates.from_civil(2024, 2, 29))
+t.check("Feb 28 + 2 days in a leap year", dates.add_days(dates.from_civil(2024, 2, 28), 2), dates.from_civil(2024, 3, 1))
+t.check("subtracting a day across the epoch", dates.add_days(dates.from_civil(1970, 1, 1), -1), dates.from_civil(1969, 12, 31))
+let mar15_2023 = dates.from_civil(2023, 3, 15)
+let mar15_2024 = dates.from_civil(2024, 3, 15)
+let mar15_2025 = dates.from_civil(2025, 3, 15)
+t.check("a year spanning Feb 29 has 366 days", dates.days_between(mar15_2023, mar15_2024), 366)
+t.check("a year without Feb 29 has 365 days", dates.days_between(mar15_2024, mar15_2025), 365)
+t.check("days_between is signed", dates.days_between(mar15_2024, mar15_2023), -366)
+t.check("actual/365 across a leap day", dates.day_count_actual_365(mar15_2023, mar15_2024), {days: 366, basis: 365})
+
+# ---- validating the host's {y, m, d, serial} struct ----
+t.check("a consistent host struct passes", dates.check_date({y: 2026, m: 10, d: 31, serial: 20757}), {y: 2026, m: 10, d: 31, serial: 20757})
+def inconsistent_serial() { dates.check_date({y: 2026, m: 10, d: 31, serial: 20756}) }
+t.check_throws("a serial that disagrees with y/m/d is rejected", inconsistent_serial, "does not match")
+def missing_field() { dates.check_date({y: 2026, m: 10, d: 31}) }
+t.check_throws("a struct without serial is rejected", missing_field, "expected {y, m, d, serial}")
+def feb30() { dates.from_civil(2024, 2, 30) }
+t.check_throws("Feb 30 is rejected", feb30, "is not in")
+def month13() { dates.from_civil(2024, 13, 1) }
+t.check_throws("month 13 is rejected", month13, "month")
+def fractional_days() { dates.add_days(jan31, 1.5) }
+t.check_throws("fractional days are rejected", fractional_days, "whole number")
+
+t.finish()

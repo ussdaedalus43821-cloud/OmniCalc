@@ -1,0 +1,129 @@
+# src/core/dates.nova - calendar math on integer serial day numbers.
+#
+# A date is {y, m, d, serial}, where serial counts days from 1970-01-01
+# (serial 0) in the proleptic Gregorian calendar. Python's equivalent is
+# date.toordinal() - 719163. The host parses and formats date strings and
+# supplies "today" as this struct; every calculation lives here.
+#
+# Conversions use Howard Hinnant's days_from_civil / civil_from_days
+# algorithms, which need floor division - exactly what NovaLang's `//`
+# does (Nova_Lang/novalang.py:3266-3269, "rounds towards negative infinity").
+
+def require_whole(value, what) {
+    if type(value) != "number" or floor(value) != value {
+        throw("dates: " + what + " must be a whole number, got " + str(value))
+    }
+    return floor(value)
+}
+
+export def is_leap_year(y) {
+    return (y % 4 == 0 and y % 100 != 0) or y % 400 == 0
+}
+
+export def days_in_month(y, m) {
+    if m == 2 {
+        if is_leap_year(y) {
+            return 29
+        }
+        return 28
+    }
+    if m == 4 or m == 6 or m == 9 or m == 11 {
+        return 30
+    }
+    return 31
+}
+
+def serial_from_civil(y, m, d) {
+    let year = y
+    if m <= 2 {
+        year = year - 1
+    }
+    let era = year // 400
+    let yoe = year - era * 400
+    let shifted_month = m + 9
+    if m > 2 {
+        shifted_month = m - 3
+    }
+    let doy = (153 * shifted_month + 2) // 5 + d - 1
+    let doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
+    return era * 146097 + doe - 719468
+}
+
+export def from_civil(y, m, d) {
+    let year = require_whole(y, "year")
+    let month = require_whole(m, "month")
+    let day = require_whole(d, "day")
+    if month < 1 or month > 12 {
+        throw("dates: month must be 1-12, got " + str(m))
+    }
+    if day < 1 or day > days_in_month(year, month) {
+        throw("dates: day " + str(d) + " is not in " + str(year) + "-" + str(month))
+    }
+    return {y: year, m: month, d: day, serial: serial_from_civil(year, month, day)}
+}
+
+export def from_serial(serial) {
+    let z = require_whole(serial, "serial") + 719468
+    let era = z // 146097
+    let doe = z - era * 146097
+    let yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
+    let doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
+    let mp = (5 * doy + 2) // 153
+    let day = doy - (153 * mp + 2) // 5 + 1
+    let month = mp + 3
+    if mp >= 10 {
+        month = mp - 9
+    }
+    let year = yoe + era * 400
+    if month <= 2 {
+        year = year + 1
+    }
+    return {y: year, m: month, d: day, serial: z - 719468}
+}
+
+# Validates a struct handed over by the host: every field present and the
+# serial consistent with y/m/d. Returns the date unchanged.
+export def check_date(date) {
+    if type(date) != "dict" or not ("y" in date) or not ("m" in date) or not ("d" in date) or not ("serial" in date) {
+        throw("dates: expected {y, m, d, serial}, got " + str(date))
+    }
+    let rebuilt = from_civil(date.y, date.m, date.d)
+    if rebuilt.serial != date.serial {
+        throw("dates: serial " + str(date.serial) + " does not match " + str(date.y) + "-" + str(date.m) + "-" + str(date.d) + " (expected " + str(rebuilt.serial) + ")")
+    }
+    return date
+}
+
+export def add_days(date, days) {
+    check_date(date)
+    return from_serial(date.serial + require_whole(days, "days"))
+}
+
+# end.serial - start.serial: positive when end is later.
+export def days_between(start, end) {
+    check_date(start)
+    check_date(end)
+    return end.serial - start.serial
+}
+
+# Adds whole months, clamping the day to the target month's last day:
+# 2024-01-31 + 1 month = 2024-02-29. The clamp does not "stick" - a later
+# add_months from 2024-02-29 starts from day 29, not from month-end.
+export def add_months(date, months) {
+    check_date(date)
+    let total = date.y * 12 + (date.m - 1) + require_whole(months, "months")
+    let year = total // 12
+    let month = total % 12 + 1
+    let day = date.d
+    let last = days_in_month(year, month)
+    if day > last {
+        day = last
+    }
+    return from_civil(year, month, day)
+}
+
+# Actual/365 Fixed: the year fraction is days / 365, returned exact as
+# {days, basis} so callers never hold a float.
+export def day_count_actual_365(start, end) {
+    return {days: days_between(start, end), basis: 365}
+}

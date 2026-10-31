@@ -1,0 +1,53 @@
+# tools/check.nova - the check() helper every tests/**/*.nova file imports.
+#
+# Same style as Nova_Lang/examples/stdlib_full_test.nova's check(label,
+# actual, expected), but the summary is finish(): on success it prints the
+# sentinel line `TESTS_OK <n>` that tools/run_tests.py requires; on any
+# failure it prints the failures, no sentinel, and exits 1. The count is a
+# number, so it is printed with str(), never len().
+
+let state = {checks: 0, failures: []}
+
+def record(label, passed, detail) {
+    state["checks"] = state["checks"] + 1
+    if not passed {
+        append(state["failures"], label + ": " + detail)
+    }
+}
+
+export def check(label, actual, expected) {
+    record(label, actual == expected, "expected " + str(expected) + ", got " + str(actual))
+}
+
+export def check_true(label, actual) {
+    record(label, actual == true, "expected true, got " + str(actual))
+}
+
+# fn is a zero-argument function that must throw; the check passes if it
+# does and the message contains `fragment`.
+export def check_throws(label, fn, fragment) {
+    let outcome = {threw: false, message: ""}
+    try {
+        fn()
+    } catch e {
+        outcome["threw"] = true
+        outcome["message"] = str(e)
+    }
+    if not outcome["threw"] {
+        record(label, false, "expected an error containing \"" + fragment + "\", but nothing was thrown")
+    } else {
+        record(label, fragment in outcome["message"], "expected an error containing \"" + fragment + "\", got \"" + outcome["message"] + "\"")
+    }
+}
+
+export def finish() {
+    if len(state["failures"]) == 0 {
+        print("TESTS_OK " + str(state["checks"]))
+    } else {
+        for message in state["failures"] {
+            print("FAIL " + message)
+        }
+        print("TESTS_FAILED " + str(len(state["failures"])) + " of " + str(state["checks"]))
+        exit(1)
+    }
+}
