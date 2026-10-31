@@ -1,0 +1,31 @@
+# module: amortization_screen
+# expect: 13
+#
+# The screen facade the Python host calls. The canonical values are the M2
+# schedule's (tests/finance/amortization_test.nova); the IRR-implied rate
+# is the M3 schedule IRR x 12 in percent, 4 decimals (6.49999%... -> 6.5000).
+
+import "../../tools/check.nova" as t
+import "../../src/app/amortization_screen.nova" as screen
+
+let canonical = screen.calculate("200,000.00", "6.5", "360", "")
+t.check("payment", canonical.payment, 126414)
+t.check("total interest", canonical.total_interest, 25508582)
+t.check("total paid", canonical.total_paid, 45508582)
+t.check("payoff period", canonical.payoff_period, 360)
+t.check("row count", len(canonical.rows), 360)
+t.check("first row", canonical.rows[0], [1, 126414, 108333, 18081, 19981919, 0, 0])
+t.check("final row shows the adjustment", canonical.rows[359], [360, 125956, 679, 125277, 0, 0, -458])
+t.check("IRR-implied annual rate", canonical.implied_rate, {value: 65000, scale: 4})
+t.check("only integers, scales and strings go back to the host", [canonical.currency, canonical.scale, len(canonical.columns), len(canonical.assumptions)], ["USD", 2, 7, 6])
+
+let extra = screen.calculate("200000", "6.5", "360", "105.34")
+t.check("extra principal: payoff at month 290", extra.payoff_period, 290)
+t.check("extra principal: total interest", extra.total_interest, 19691855)
+
+def bad_rate() { screen.calculate("200000", "6.5%", "360", "0") }
+t.check_throws("a typed % sign is rejected with the field name", bad_rate, "annual rate \"6.5%\" is not a number")
+def negative_rate() { screen.calculate("200000", "-1", "360", "0") }
+t.check_throws("a negative annual rate is rejected", negative_rate, "must not be negative")
+
+t.finish()

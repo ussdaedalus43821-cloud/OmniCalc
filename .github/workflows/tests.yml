@@ -24,6 +24,14 @@ jobs:
         with:
           python-version: "3.12"
       - run: python3 tools/run_tests.py
+      - name: Host tests (headless bridge + CSV)
+        # unittest exits 5 when it finds no tests (Python 3.12+), so an empty
+        # or misnamed suite fails here instead of passing silently. Runners
+        # are slower and noisier than a workstation, so the 100 ms UI budget
+        # assertion gets 3x headroom in CI; locally it is the real 100 ms.
+        env:
+          OMNICALC_BUDGET_MS: "300"
+        run: python3 -m unittest discover -s tests/host -p "*_test.py" -t . -v
 
   bootstrap:
     name: NovaLang tests (--bootstrap, nightly)

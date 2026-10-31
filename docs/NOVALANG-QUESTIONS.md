@@ -54,3 +54,12 @@ the bound is **inclusive**: `for i = 0 to 3` visits 0, 1, 2, 3 (verified, and `s
 too). `range(n)` *is* exclusive. The issue suggests fixing the docs rather than the runtime.
 Filed as https://github.com/ussdaedalus43821-cloud/Nova_Lang/issues/4. OmniCalc's rule is in
 `CLAUDE.md` ("Known gaps and traps").
+
+## Embedding findings (M4, no upstream issue needed)
+- `Nova().load_file(path)` followed by `nova.call("fn", ...)` works for functions defined at the
+  top of the loaded file (`export def` included). The file's relative imports resolve against
+  its own directory (`novalang.py` `Nova.load_file`).
+- `str(NovaLangError)` is already the bare message, e.g. `parse: principal "abc" is not a
+  number`, with no source excerpt, so the host shows it as is.
+- Arguments and results cross the bridge as copies (`to_nova_value` / `to_python_value`), as
+  the README warns. The screen façade returns plain ints, strings and lists, so this is free.

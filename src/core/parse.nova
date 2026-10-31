@@ -1,0 +1,95 @@
+# src/core/parse.nova - text typed by a person -> exact integers.
+#
+# The host does no arithmetic (CLAUDE.md "Bridge contract"), so turning
+# "200,000.00" into 20000000 minor units, or "6.5" (percent) into 65000
+# micro-units, happens here. Nothing is ever rounded: input with more
+# decimal places than the scale allows is rejected, not truncated.
+#
+# Accepted: optional surrounding spaces, an optional leading "-", digits, at
+# most one ".", and "," thousands separators in the whole part only when
+# every group after the first has exactly three digits ("1,234,567.89").
+# Anything else - "1,5", "1.2.3", "12a", "" - throws, naming the field.
+
+let DIGITS = "0123456789"
+
+def all_digits(text) {
+    for i = 0 to len(text) - 1 {
+        if not (text[i] in DIGITS) {
+            return false
+        }
+    }
+    return true
+}
+
+def reject(what, text, why) {
+    throw("parse: " + what + " \"" + text + "\" " + why)
+}
+
+# "1,234,567" -> "1234567", or throws if the grouping is not by threes.
+def strip_grouping(whole, what, original) {
+    if not ("," in whole) {
+        return whole
+    }
+    let groups = split(whole, ",")
+    if len(groups[0]) < 1 or len(groups[0]) > 3 {
+        reject(what, original, "has misplaced thousands separators")
+    }
+    for i = 1 to len(groups) - 1 {
+        if len(groups[i]) != 3 {
+            reject(what, original, "has misplaced thousands separators")
+        }
+    }
+    return join(groups, "")
+}
+
+# text -> a whole number of 10^-scale units. "19.9" at scale 2 is 1990.
+export def decimal(text, scale, what) {
+    if type(text) != "string" {
+        throw("parse: " + what + " must be text, got " + str(text))
+    }
+    let body = trim(text)
+    let sign = {negative: false}
+    if len(body) > 0 and body[0] == "-" {
+        sign["negative"] = true
+        body = body[1:]
+    }
+    if len(body) == 0 {
+        reject(what, text, "is empty")
+    }
+    let parts = split(body, ".")
+    if len(parts) > 2 {
+        reject(what, text, "has more than one decimal point")
+    }
+    let whole = strip_grouping(parts[0], what, text)
+    let fraction = ""
+    if len(parts) == 2 {
+        fraction = parts[1]
+    }
+    if len(whole) == 0 and len(fraction) == 0 {
+        reject(what, text, "has no digits")
+    }
+    if not all_digits(whole) or not all_digits(fraction) {
+        reject(what, text, "is not a number")
+    }
+    if len(fraction) > scale {
+        reject(what, text, "has more than " + str(scale) + " decimal places")
+    }
+    let padded = fraction + pad("", scale - len(fraction))
+    padded = replace_all(padded, " ", "0")
+    let units = {value: 0}
+    if len(whole) > 0 {
+        units["value"] = num(whole) * pow(10, scale)
+    }
+    if len(padded) > 0 {
+        units["value"] = units.value + num(padded)
+    }
+    if sign.negative {
+        return 0 - units.value
+    }
+    return units.value
+}
+
+# text -> a whole number (no decimal point allowed).
+export def whole(text, what) {
+    return decimal(text, 0, what)
+}

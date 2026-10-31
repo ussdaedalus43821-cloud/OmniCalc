@@ -20,7 +20,35 @@ An entry missing any field is invalid. An escape hatch that isn't listed here is
 
 ## Entries
 
-_None._
+_None built._
+
+## Planned escape hatches (not built)
+
+Each is tracked here so it isn't forgotten. None is built yet, and none has a parity test.
+
+### Multi-sign-change IRR over 60 periods
+- **Python module:** `src/host/irr_scan.py` (planned).
+- **Replaces interface:** `src/finance/cashflow.nova :: irr` (and so `irr_min_nonneg`), only
+  for flows with **two or more sign changes and more than 60 periods**.
+- **Parity test:** `tests/host/irr_scan_parity_test.py` (planned). It would run both on flows
+  of 60 periods or fewer and require identical roots.
+- **Reason:** the NovaLang Budan search costs O(K²) per root count. Measured: 120 ms at 30
+  periods and 271 ms at 60. It refuses more than 60 periods, with an error that points here.
+  Real cases (options, private equity, irregular working capital) are rare.
+- **Status:** not built; the parity test is deferred to the M4 host (the bridge now exists).
+- **Date added:** 2026-10-31.
+
+### XIRR with more than one sign change
+- **Python module:** `src/host/xirr_scan.py` (planned).
+- **Replaces interface:** `src/finance/cashflow.nova :: xirr`, for dated flows with two or
+  more sign changes. `xirr` throws for these today, with an error that points here.
+- **Parity test:** `tests/host/xirr_scan_parity_test.py` (planned). Single-sign-change flows
+  through both must give the same rate within 1e-11.
+- **Reason:** Budan's theorem needs a polynomial of manageable degree. With dated flows the
+  exponents are day counts, so the degree is the number of days (thousands). A 5 bp grid of
+  float XNPV evaluations would cost seconds in NovaLang.
+- **Status:** not built.
+- **Date added:** 2026-10-31.
 
 ## Decisions to keep in NovaLang (no escape hatch)
 
@@ -62,6 +90,34 @@ These were checked against the budget and stay in NovaLang. Re-measure if inputs
 - Decision: within the 100 ms budget, so it stays in NovaLang. Re-measure before adding
   longer schedules (e.g. weekly) or per-row features, because cost grows linearly with rows.
 
+### Unchecked core for schedule IRR — `cashflow.schedule_irr` (pre-M4, 2026-10-31)
+- Before: per-flow validation cost about 37 ms of the 64 ms IRR on 361 flows, re-checking
+  amounts that `amortization.nova` had already validated.
+- After: `schedule_irr(schedule)` builds the flows straight from the schedule rows and
+  calls the unchecked core (`shape_whole`). The checked `irr(from_schedule(...))` path is
+  unchanged, and a test checks that the two agree.
+- Measured end to end (pmt + schedule + IRR) in NovaLang: **89 ms → 60 ms**, under the 70 ms
+  target.
+- This is the second site of the unchecked-core pattern (the first is `money.round_half_up`).
+
+### XIRR — `src/finance/cashflow.nova :: xirr` (M4, 2026-10-31)
+- Measured: a 20-flow XIRR (one sign change) takes **26.5 ms**. Microsoft's 5-flow example
+  takes 8.8 ms. It stays in NovaLang.
+
+### Amortization screen, end to end through the host (M4, 2026-10-31)
+- What's measured: `app.calculate` (NovaLang parse + pmt + schedule + schedule IRR + rows,
+  through the embedding bridge).
+- Headless, best of 3: about 52 ms on Python 3.13 and 55 ms on 3.12.
+- GUI (Python 3.12, Tk 8.6, Xvfb), 16 Calculate presses, timed including drawing the 360-row
+  table:
+  - median **about 64 ms**, and 14 of 16 under 80 ms;
+  - two spikes of 98 ms and **111 ms**, the same machine noise headless runs show.
+- The first press in a fresh process ran 108 ms cold. `app.warm_up()` now runs one
+  calculation at startup, so presses are always warm.
+- Decision: stays in NovaLang. If spikes matter on slow machines, the next lever is the
+  unchecked core again: the amortization row dicts and the façade's row re-pack. The other
+  lever is fewer bisection steps in `schedule_irr`, e.g. a Newton start. Measure first.
+
 ### NPV / IRR — `src/finance/cashflow.nova` (M3, 2026-10-31)
 - Measured: 10 calls each, same setup as above.
 
@@ -91,7 +147,17 @@ These were checked against the budget and stay in NovaLang. Re-measure if inputs
 
 ## Known approximations
 
-Behavior that is deliberately not exact. Each entry says what is approximated, why, and what to
+Behavior that is deliberately not exact.
+
+### XNPV / XIRR discount factors are binary floats (M4)
+- **What.** `cashflow.xnpv`/`xirr` discount each flow by `(1 + rate)^(days / 365)` using
+  `pow()` on floats. Amounts stay integer minor units, and the sum is rounded half-up once.
+- **Why.** That factor is irrational for almost every rate, so no exact form exists.
+  Excel uses floats too. A fixed-point exp/ln series in NovaLang would cost about 1 s per XIRR.
+- **Size.** The relative error is about 1e-15. XNPV matches a 50-digit decimal reference to
+  the cent in every test, and XIRR matches it to 1e-11 (tests compare at 1e-11, not 1e-12).
+- **Note.** Excel itself is less precise: its XIRR stops at 1e-8. Microsoft's example result
+  0.373362535 is 1.5e-9 from the exact 0.37336253352. Each entry says what is approximated, why, and what to
 use when exactness matters.
 
 ### `tvm.n` → `periods` slack (M1, documented in M2)

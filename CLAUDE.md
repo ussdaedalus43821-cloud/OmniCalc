@@ -13,7 +13,9 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
   (`Nova_Lang/README.md` "Quick start", "Self-hosting"). The host embeds it through the `Nova` class
   (`README.md` "Embedding NovaLang in Python").
 - Build command: **none.** NovaLang has no build step.
-- Test command: `python3 tools/run_tests.py` (runs the pin check, then every `tests/**/*.nova`).
+- Test command: `python3 tools/run_tests.py` (runs the pin check, then every `tests/**/*.nova`),
+  then `python3 -m unittest discover -s tests/host -p "*_test.py" -t .` for the host. Both run in
+  CI.
   Nightly CI only: `python3 tools/run_tests.py --bootstrap` (about 50x slower; the dates test
   takes about 50 s).
 - Formatter/linter: **none exists** (`novalang.py:4154`, `--bootstrap` is the only flag).
@@ -48,6 +50,26 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
 - The host's **only** formatting job is `minor` + `scale` + `currency` → display string. It
   never rounds, scales, converts, or does arithmetic on money. Any rounding the display needs
   is done in NovaLang first.
+
+## Bridge contract: no math in Python (M4)
+- **The host does zero arithmetic.** `src/host/app.py` hands NovaLang the input boxes **as
+  typed** (strings). `src/app/amortization_screen.nova`'s `calculate()` parses them
+  (`src/core/parse.nova`, never rounding) and returns only integers, scales and strings,
+  including schedule rows as integer lists plus one scale.
+- The host formats integer + scale as text (`format_minor`), draws it, and writes CSV.
+- **Enforced:** `tests/host/bridge_test.py` parses `app.py` and fails on any arithmetic
+  operator outside `app.ARITHMETIC_ALLOWED`, which is formatting (`format_minor`), timing
+  (`elapsed_ms`) and smoke-test click delays (`parse_args`). String and list concatenation
+  are allowed. It caught an `argv.index(...) + 1` on its first run.
+- **Proved:** the same test compares `app.calculate(...)` with
+  `tools/calc_cli.nova` run through the plain interpreter. They must be identical.
+- **Speed:** `app.calculate` must finish within the 100 ms budget. The test takes the best of
+  3; CI sets `OMNICALC_BUDGET_MS=300` for runner noise. `OMNICALC_DEBUG=1` logs every press.
+  `app.warm_up()` runs one calculation at startup, because a cold first call is about 50%
+  slower.
+- **Running the app:** Tkinter isn't on pip. On Ubuntu, `apt install python3-tk` (for
+  `/usr/bin/python3.12`), then `python3.12 src/host/app.py`. The calculation path imports
+  without Tkinter or a display.
 
 ## Host / NovaLang boundary
 | Python host owns | NovaLang owns |
@@ -86,6 +108,9 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
 - Primitives in this pattern:
   - `money.round_half_up` (checked) / `money.round_half_up_whole` (unchecked core, used by
     `amortization.nova`).
+  - `cashflow.irr(from_schedule(s))` (checked) / `cashflow.schedule_irr(s)` (unchecked core
+    `shape_whole`, for schedules built by `amortization.nova`). This cut end to end from
+    89 ms to 60 ms. A test checks that both agree.
 
 ## Solver rules
 - **Sign convention.** Cash received is positive and cash paid out is negative. A loan you take
@@ -142,7 +167,10 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
   are the flows in period order.
 - **Descartes' rule of signs.** With `V` sign changes among the non-zero flows, the number of
   roots with r > −100% is at most `V` and has the same parity as `V`.
-- **`V = 0`:** no root. `irr` returns `[]` without searching.
+- **`V = 0`:** no root at any rate above −100%, so `irr` returns `[]` without searching.
+  Descartes bounds the *positive* roots of `P(x)`, and `x > 0` is exactly `r > −100%`, the
+  whole domain. A root at `x < 0` would be a "rate" below −100%, which is meaningless. Put
+  financially: a single-sign flow's NPV is never zero at any rate above −100%.
 - **`V = 1`:** exactly one root, so the search is fast and complete.
   - Bracket by walking outward from 0 with `tvm.rate`'s candidate lists
     (−99.99% … 1,048,576%), then bisect exactly.
@@ -163,8 +191,12 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
     double roots.
   - **Cost bound:** `O(K²)` integer steps per Budan count, with about 2 × log₂(3,980) ≈ 25
     counts for two roots. Measured: 15 ms at 2 periods, 85 ms at 20, 120 ms at 30.
-  - **Hard cap:** V ≥ 2 flows over **60 periods** (about 270 ms) are refused with an error.
-    Over-budget cases are listed in `docs/ESCAPE-HATCHES.md`.
+  - **Hard caps:** V ≥ 2 flows over **60 periods** (about 270 ms) are refused with an error
+    that names the cap, says why, and points to `docs/ESCAPE-HATCHES.md`, where a planned
+    escape hatch is tracked. Independently, the search stops after 400 Budan counts and
+    200 bisection steps per root.
+- **`irr_min_nonneg`** returns the smallest root **≥ 0**, so 0% counts: [−100, +100] → 0%, as
+  in Excel. It throws only when no root ≥ 0 exists.
 - **Exact evaluation.**
   - With `r = num / D`, `D = den × MICRO`, `G = D + num`: `NPV = N / G^K` where
     `N = Σ c_j · D^j · G^(K−j)`, and `G^K > 0`.
@@ -182,6 +214,24 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
   therefore checks two things:
   - at cents, the IRR against the exact reference within 1e-12;
   - at scale 6, the IRR back to the loan rate within 1e-9.
+
+## XNPV / XIRR convention (`src/finance/cashflow.nova`, M4)
+- **Excel's convention, and only Excel's.** v1 offers no alternatives.
+  - A dated flow is `{date_serial, amount}`. `d_0` is the **first flow's** date, and a later
+    flow dated before it throws (Excel gives #NUM!).
+  - Each flow is discounted by `(1 + rate)^(days / 365)`, where
+    `days = dates.day_count_actual_365(d_0, d_i).days` (actual/365, "a 365-day year").
+  - `rate` is an **annual** effective rate, unlike `npv`/`irr`, whose rate is per period.
+- **Floats for the discount factor only.** It's irrational, so this is a known approximation in
+  `docs/ESCAPE-HATCHES.md`. Amounts stay integer, and the result is rounded half-up once.
+- **XIRR.** Descartes' rule on the flows in date order:
+  - V = 0 throws;
+  - V = 1: bracket and bisect to 1e-12 a year, verified to leave an XNPV within one minor
+    unit of zero;
+  - **V ≥ 2 throws**, because Budan doesn't apply when the degree is a day count. A planned
+    escape hatch is tracked.
+- **References:** Microsoft's XNPV/XIRR example (XNPV(9%) = 2,086.65, XIRR 0.373362535,
+  where Excel is only good to 1e-8) and `tests/finance/gen_xcashflow_vectors.py` (50 digits).
 
 ## Amortization rules (`src/finance/amortization.nova`)
 - **Magnitudes, not signed cash flows.** Principal, payment, extra and lump sums are positive
@@ -270,11 +320,12 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
 - src/finance/amortization.nova — schedules, extra payments, biweekly (M2); refinance later
 - src/finance/investments — compound interest (v1); CAGR, DCA, retirement (later)
 - src/finance/business — margin, break-even, ROI, depreciation (post-v1)
-- src/ui — Tkinter calculator screens (host)
+- src/app — NovaLang screen façades (one per screen; all the screen's math)
+- src/host/app.py — the Tkinter host (formatting, drawing, CSV only)
 - src/storage — presets, scenarios, local DB (post-v1)
 - src/export — CSV (v1, host); PDF (post-v1)
 - tools/run_tests.py — test runner; tools/check.nova — check() helper and sentinel
-- tests/core, tests/finance — golden test vectors
+- tests/core, tests/finance, tests/app — golden test vectors (.nova); tests/host — host tests (Python)
 
 ## Milestones
 - **M0 — Foundation only. No calculator modules.** ✅ done, reviewed
@@ -304,13 +355,23 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
     `tests/finance/gen_amortization_vectors.py` and a row-by-row diff against
     `tests/finance/vectors/mortgage_200k_6_5_360.json`.
   - Not in M2: refinance, rent-vs-buy, extra-payment comparison logic.
-- **M3 — NPV/IRR and uneven cash flows.** 🚧 in progress, awaiting review.
-  - `src/finance/cashflow.nova`: `npv`, `irr` (all roots found), `irr_min_positive`, `payback`
-    (undiscounted, linearly interpolated), and `from_schedule`.
+- **M3 — NPV/IRR and uneven cash flows.** ✅ done, reviewed.
+  - `src/finance/cashflow.nova`: `npv`, `irr` (all roots found), `irr_min_nonneg` (renamed
+    from `irr_min_positive`; 0% counts), `payback` (undiscounted, linearly interpolated),
+    `from_schedule`, and `schedule_irr` (the unchecked core, added before M4).
   - Tests: `tests/finance/cashflow_test.nova`, with Python vectors from
     `tests/finance/gen_cashflow_vectors.py`.
   - Not in M3: XNPV/XIRR, which need dated flows.
-- **M4 — XNPV/XIRR, dates-based cash flows, and the start of the UI host.**
+- **M4 — XNPV/XIRR, dates-based cash flows, and the start of the UI host.** 🚧 in progress,
+  awaiting review.
+  - `cashflow.xnpv`, `cashflow.xirr` (Excel convention; XIRR supports one sign change).
+  - Host:
+    - `src/core/parse.nova`, `src/app/amortization_screen.nova` (the screen's one façade);
+    - `src/host/app.py` (one Tkinter screen: inputs, summary, schedule, Export CSV);
+    - `tools/calc_cli.nova`.
+  - Tests: `tests/core/parse_test.nova`, `tests/app/amortization_screen_test.nova`, and
+    `tests/host/bridge_test.py` + `csv_test.py`, which CI runs with `unittest`.
+- **M5 — more screens:** compound interest, savings, refinance, debt payoff (a full UI pass).
 - **Later — compound interest** (`investments`).
 - **Later — Scientific + units** (`core/math`).
 - **Later — the full Tkinter host:** screens with formula/assumptions, CSV export, a terminal debug

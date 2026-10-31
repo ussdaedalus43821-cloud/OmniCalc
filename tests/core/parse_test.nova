@@ -1,0 +1,37 @@
+# module: parse
+# expect: 20
+
+import "../../tools/check.nova" as t
+import "../../src/core/parse.nova" as parse
+
+t.check("plain decimal at scale 2", parse.decimal("200000.00", 2, "x"), 20000000)
+t.check("fewer decimals are padded", parse.decimal("19.9", 2, "x"), 1990)
+t.check("no decimal point", parse.decimal("42", 2, "x"), 4200)
+t.check("thousands separators", parse.decimal("1,234,567.89", 2, "x"), 123456789)
+t.check("surrounding spaces", parse.decimal("  7.5 ", 2, "x"), 750)
+t.check("leading decimal point", parse.decimal(".5", 2, "x"), 50)
+t.check("negative", parse.decimal("-3.25", 2, "x"), -325)
+t.check("percent to micro-units: 6.5 at scale 4", parse.decimal("6.5", 4, "rate"), 65000)
+t.check("percent to micro-units: 0.0001 at scale 4", parse.decimal("0.0001", 4, "rate"), 1)
+t.check("leading zeros", parse.decimal("007.10", 2, "x"), 710)
+t.check("whole", parse.whole("360", "months"), 360)
+def too_many_places() { parse.decimal("1.005", 2, "principal") }
+t.check_throws("more decimals than the scale: rejected, not rounded", too_many_places, "principal \"1.005\" has more than 2 decimal places")
+def bad_grouping() { parse.decimal("1,5", 2, "x") }
+t.check_throws("European-style 1,5 is rejected", bad_grouping, "misplaced thousands separators")
+def two_points() { parse.decimal("1.2.3", 2, "x") }
+t.check_throws("two decimal points", two_points, "more than one decimal point")
+def letters() { parse.decimal("12a", 2, "x") }
+t.check_throws("letters", letters, "is not a number")
+def empty() { parse.decimal("  ", 2, "x") }
+t.check_throws("empty", empty, "is empty")
+def only_point() { parse.decimal(".", 2, "x") }
+t.check_throws("a lone point", only_point, "has no digits")
+def fractional_whole() { parse.whole("12.5", "months") }
+t.check_throws("whole rejects a fraction", fractional_whole, "more than 0 decimal places")
+def not_text() { parse.decimal(5, 2, "x") }
+t.check_throws("non-text input", not_text, "must be text")
+def sign_only() { parse.decimal("-", 2, "x") }
+t.check_throws("a lone minus", sign_only, "is empty")
+
+t.finish()

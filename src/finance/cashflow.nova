@@ -12,16 +12,23 @@
 # ---- IRR and multiple roots ----
 # irr() returns EVERY root it finds, sorted ascending, each an unrounded
 # {num, den} within 1e-12 per period, whose NPV rounds to within one minor
-# unit of zero. irr_min_positive() returns the
-# smallest positive one (the convention of Excel's RATE/IRR, and of
-# tvm.rate). The search is decided by Descartes' rule of signs on the
-# flows - see CLAUDE.md "IRR scan strategy" for the full write-up:
+# unit of zero. irr_min_nonneg() returns the smallest root >= 0 - 0% counts:
+# [-100, +100] has an IRR of 0%, as in Excel and every textbook. The search
+# is decided by Descartes' rule of signs on the flows - see CLAUDE.md
+# "IRR scan strategy" for the full write-up:
 #   V = 0 sign changes: no root.  V = 1: exactly one root, found over
 #   -99.99% .. 1,048,576%.  V >= 2: the 5 bp grid over [-99%, +100%),
 #   searched by Budan's theorem rather than cell by cell. It finds every
 #   root alone in its 5 bp cell, so any two roots at least 10 bp apart;
 #   roots outside that range, an even number of roots in one cell, and
 #   double roots are not found.
+# What Descartes' rule actually proves: it bounds the POSITIVE roots of
+#   P(x) = sum c_j x^j. Here x = 1/(1+r), and x > 0 exactly when r > -100%,
+#   so "no sign changes" means no root at any rate above -100% - the whole
+#   domain. It does not say P has no roots at all: a root at x < 0 would be
+#   a "rate" below -100%, outside the domain and meaningless. The financial
+#   reading: a single-sign flow (all outlays, or all receipts) has an NPV
+#   that is never zero at any rate above -100%.
 #
 # ---- Exact arithmetic ----
 # With r = num / D, D = den * MICRO and G = D + num, NPV = N / G^K where
@@ -33,6 +40,7 @@
 import "../core/numbers.nova" as numbers
 import "../core/money.nova" as money
 import "../core/rates.nova" as rates
+import "../core/dates.nova" as dates
 
 let MICRO = rates.MICRO
 let MAX_PERIOD = 100000
@@ -49,6 +57,10 @@ let GRID_STEP = 500
 # (docs/ESCAPE-HATCHES.md). Past MAX_MULTI_ROOT_PERIODS it is refused
 # rather than allowed to stall the UI for seconds.
 let MAX_MULTI_ROOT_PERIODS = 60
+# A second, independent bound on the V >= 2 search: at most this many Budan
+# counts (a pathological flow cannot exceed it; two roots take ~25), and at
+# most MAX_BISECTIONS steps per root.
+let MAX_BUDAN_COUNTS = 400
 let GRID_FIRST = -1980
 let GRID_LAST = 2000
 
@@ -79,11 +91,15 @@ def require_rate(rate) {
     return rate
 }
 
-# flows -> {unit, last, coeffs, runs, changes}: coeffs[j] is the summed
-# minor units in period j (0..last); runs are [first, last, amount] for
-# each maximal stretch of equal non-zero consecutive coefficients; changes
-# is the number of sign changes among the non-zero coefficients.
+# Checked: validates every flow, then builds the shape (shape_whole).
 def normalize(flows) {
+    validate_flows(flows)
+    return shape_whole(flows)
+}
+
+# Throws unless flows is a non-empty list of {period, amount} with whole
+# periods in 0..MAX_PERIOD and money amounts sharing one unit.
+def validate_flows(flows) {
     if type(flows) != "list" or len(flows) == 0 {
         throw("cashflow: flows must be a non-empty list of {period, amount}")
     }
@@ -97,8 +113,21 @@ def normalize(flows) {
             throw("cashflow: period must be 0-" + str(MAX_PERIOD) + ", got " + str(flow.period))
         }
         money.check_same_unit(flows[0].amount, flow.amount)
-        if period > shape.last {
-            shape["last"] = period
+    }
+    return true
+}
+
+# The unchecked core: flows -> {unit, last, coeffs, runs, changes}.
+# coeffs[j] is the summed minor units in period j (0..last); runs are
+# [first, last, amount] for each maximal stretch of equal non-zero
+# consecutive coefficients; changes is the number of sign changes among the
+# non-zero coefficients. flows MUST already be valid (validate_flows, or
+# built from a schedule by schedule_irr).
+def shape_whole(flows) {
+    let shape = {last: 0}
+    for flow in flows {
+        if flow.period > shape.last {
+            shape["last"] = flow.period
         }
     }
     let coeffs = []
@@ -106,8 +135,7 @@ def normalize(flows) {
         append(coeffs, 0)
     }
     for flow in flows {
-        let period = floor(flow.period)
-        coeffs[period] = coeffs[period] + flow.amount.minor
+        coeffs[flow.period] = coeffs[flow.period] + flow.amount.minor
     }
     let runs = []
     let walk = {start: 0, previous_sign: 0, changes: 0}
@@ -244,6 +272,10 @@ def variations(shape, i, memo) {
     if key in memo {
         return memo[key]
     }
+    memo["count"] = memo["count"] + 1
+    if memo["count"] > MAX_BUDAN_COUNTS {
+        throw("cashflow: the multi-root IRR search exceeded its bound of " + str(MAX_BUDAN_COUNTS) + " root counts (see docs/ESCAPE-HATCHES.md)")
+    }
     let q = GRID_P + i
     let coeffs = shape.coeffs
     let poly = [coeffs[shape.last]]
@@ -303,7 +335,7 @@ def isolate(shape, lo, hi, memo, roots) {
 }
 
 def grid_roots(shape) {
-    return isolate(shape, GRID_FIRST, GRID_LAST, {}, [])
+    return isolate(shape, GRID_FIRST, GRID_LAST, {count: 0}, [])
 }
 
 # The verification CLAUDE.md requires of every solver: NPV at the root,
@@ -351,7 +383,10 @@ export def npv(rate, flows) {
 # Every IRR found, sorted ascending (see the header for what is searched).
 # [] when there is none.
 export def irr(flows) {
-    let shape = normalize(flows)
+    return irr_of_shape(normalize(flows))
+}
+
+def irr_of_shape(shape) {
     if shape.changes == 0 {
         return []
     }
@@ -359,22 +394,26 @@ export def irr(flows) {
         return verified(shape, single_root(shape))
     }
     if shape.last > MAX_MULTI_ROOT_PERIODS {
-        throw("cashflow: these flows change sign " + str(shape.changes) + " times, and the multi-root IRR search supports at most " + str(MAX_MULTI_ROOT_PERIODS) + " periods (got " + str(shape.last) + ")")
+        throw("cashflow: these flows change sign " + str(shape.changes) + " times, and the multi-root IRR scan (needed when flows change sign more than once) supports at most " + str(MAX_MULTI_ROOT_PERIODS) + " periods; got " + str(shape.last) + ". Longer flows need the planned Python escape hatch - see docs/ESCAPE-HATCHES.md")
     }
     return verified(shape, grid_roots(shape))
 }
 
-export def irr_min_positive(flows) {
-    let roots = irr(flows)
+# The smallest root >= 0 (0% included); throws if there is none.
+export def irr_min_nonneg(flows) {
+    return min_nonneg(irr(flows))
+}
+
+def min_nonneg(roots) {
     if len(roots) == 0 {
         throw("cashflow: these cash flows have no IRR in the search range")
     }
     for root in roots {
-        if root.num > 0 {
+        if root.num >= 0 {
             return root
         }
     }
-    throw("cashflow: no positive IRR; the roots found are " + describe_rates(roots) + " micro-units per period")
+    throw("cashflow: no non-negative IRR; the roots found are " + describe_rates(roots) + " micro-units per period")
 }
 
 # Undiscounted payback: the time at which the running total of the flows
@@ -422,4 +461,196 @@ export def from_schedule(schedule) {
         append(flows, {period: row.period, amount: money.negate(row.payment)})
     }
     return flows
+}
+
+# irr_min_nonneg(from_schedule(schedule)), on the unchecked core. The
+# schedule MUST come from src/finance/amortization.nova, which validated
+# every amount before building it: its rows are re-read here without the
+# per-flow checks that cost ~37 ms on 361 flows (CLAUDE.md "Hot-loop
+# primitives"). tests/finance/cashflow_test.nova checks that it agrees with
+# the checked path.
+export def schedule_irr(schedule) {
+    if type(schedule) != "dict" or not ("rows" in schedule) or type(schedule.rows) != "list" or len(schedule.rows) == 0 {
+        throw("cashflow: schedule_irr needs a schedule {rows, totals} with at least one row")
+    }
+    let first = schedule.rows[0]
+    let unit = first.payment
+    let flows = [{period: 0, amount: {minor: first.balance.minor + first.principal.minor, scale: unit.scale, currency: unit.currency}}]
+    for row in schedule.rows {
+        append(flows, {period: row.period, amount: {minor: 0 - row.payment.minor, scale: unit.scale, currency: unit.currency}})
+    }
+    return min_nonneg(irr_of_shape(shape_whole(flows)))
+}
+
+# ---- XNPV / XIRR: dated cash flows ----
+# A dated flow is {date_serial, amount}: date_serial is a dates.nova serial
+# (dates.from_civil(y, m, d).serial) and amount is signed money, as above.
+# The convention is Excel's, and only Excel's (no alternatives in v1):
+#   - d_0 is the date of the FIRST flow in the list; no later flow may be
+#     dated before it (Excel returns #NUM! there; this throws).
+#   - each flow is discounted by (1 + rate)^(days_i / 365), where days_i is
+#     dates.day_count_actual_365(d_0, d_i).days - actual/365, "a 365-day
+#     year" in Microsoft's XNPV/XIRR documentation.
+#   - rate is an ANNUAL effective rate {num, den} (unlike npv/irr, whose
+#     rate is per period), above -100%.
+# FLOATS: (1 + rate)^(days / 365) is irrational for almost every rate, so
+# XNPV cannot be exact. Amounts stay integer minor units; only the discount
+# factor is a binary float (pow()), and the sum is rounded half-up once to a
+# minor unit. Relative error is ~1e-15, far below a minor unit for any
+# realistic amount. Listed in docs/ESCAPE-HATCHES.md "Known approximations".
+# XIRR uses Descartes' rule like irr(), with the flows ordered by date: V = 0
+# has no root (throws); V = 1 has exactly one, found over -99.99% ..
+# 1,048,576% a year by bracketing and bisection to 1e-12 a year, verified to
+# leave an XNPV within one minor unit of zero. V >= 2 is NOT supported:
+# Budan's theorem needs a polynomial, and here the degree would be the
+# number of days (thousands). That is a planned escape hatch
+# (docs/ESCAPE-HATCHES.md).
+
+def validate_dated(dated_flows) {
+    if type(dated_flows) != "list" or len(dated_flows) == 0 {
+        throw("cashflow: dated flows must be a non-empty list of {date_serial, amount}")
+    }
+    let start = {serial: 0}
+    for flow in dated_flows {
+        if type(flow) != "dict" or not ("date_serial" in flow) or not ("amount" in flow) {
+            throw("cashflow: each dated flow must be {date_serial, amount}, got " + str(flow))
+        }
+        numbers.require_whole(flow.date_serial, "date_serial", "cashflow")
+        money.check_same_unit(dated_flows[0].amount, flow.amount)
+    }
+    let first = dates.from_serial(dated_flows[0].date_serial)
+    let terms = []
+    for flow in dated_flows {
+        let days = dates.day_count_actual_365(first, dates.from_serial(flow.date_serial)).days
+        if days < 0 {
+            throw("cashflow: a flow is dated " + str(0 - days) + " days before the first flow; the first flow must be the earliest (as in Excel)")
+        }
+        append(terms, [days, flow.amount.minor])
+    }
+    return {unit: dated_flows[0].amount, terms: terms}
+}
+
+# sum of minor_i * (1 + r)^(-days_i / 365) at r = numerator / (den * MICRO), a float.
+def xnpv_float(terms, numerator, den) {
+    let growth = 1 + numerator / (den * MICRO)
+    let acc = {v: 0}
+    for term in terms {
+        acc["v"] = acc.v + term[1] * pow(growth, 0 - term[0] / 365)
+    }
+    return acc.v
+}
+
+# A finite float rounded half-up (away from zero) to a whole number.
+def round_float_half_up(value) {
+    if not numbers.is_finite(value) {
+        throw("cashflow: XNPV is not a finite number (the rate is too extreme for these dates)")
+    }
+    if value >= 0 {
+        return floor(value + 0.5)
+    }
+    return 0 - floor(0 - value + 0.5)
+}
+
+def xsign(terms, numerator, den) {
+    return sign(xnpv_float(terms, numerator, den))
+}
+
+# Sign changes among the per-day sums, in date order.
+def dated_sign_changes(terms) {
+    let by_day = {}
+    let order = []
+    for term in terms {
+        let key = str(term[0])
+        if not (key in by_day) {
+            by_day[key] = 0
+            append(order, term[0])
+        }
+        by_day[key] = by_day[key] + term[1]
+    }
+    let walk = {previous: 0, changes: 0}
+    for day in sorted(order) {
+        let c = by_day[str(day)]
+        if c != 0 {
+            if walk.previous != 0 and sign(c) != walk.previous {
+                walk["changes"] = walk.changes + 1
+            }
+            walk["previous"] = sign(c)
+        }
+    }
+    return walk.changes
+}
+
+def xbisect(terms, lo, hi, s_lo) {
+    let state = {lo: lo, hi: hi, q: 1}
+    for i = 1 to MAX_BISECTIONS {
+        if (state.hi - state.lo) * WIDTH_FACTOR <= state.q {
+            let candidate = reduced(state.lo + state.hi, 2 * state.q)
+            if abs(round_float_half_up(xnpv_float(terms, candidate.num, candidate.den))) <= 1 {
+                return candidate
+            }
+        }
+        let mid = state.lo + state.hi
+        state["lo"] = 2 * state.lo
+        state["hi"] = 2 * state.hi
+        state["q"] = 2 * state.q
+        let s = xsign(terms, mid, state.q)
+        if s == 0 {
+            return reduced(mid, state.q)
+        }
+        if s == s_lo {
+            state["lo"] = mid
+        } else {
+            state["hi"] = mid
+        }
+    }
+    throw("cashflow: XIRR did not converge in " + str(MAX_BISECTIONS) + " bisections")
+}
+
+# XNPV at an ANNUAL rate, rounded half-up once to a minor unit.
+export def xnpv(rate, dated_flows) {
+    require_rate(rate)
+    let shape = validate_dated(dated_flows)
+    let minor = round_float_half_up(xnpv_float(shape.terms, rate.num, rate.den))
+    return money.make(minor, shape.unit.scale, shape.unit.currency)
+}
+
+# The annual XIRR as an unrounded {num, den}. Throws when there is no root
+# (single-sign flows) and when the flows change sign more than once.
+export def xirr(dated_flows) {
+    let shape = validate_dated(dated_flows)
+    let changes = dated_sign_changes(shape.terms)
+    if changes == 0 {
+        throw("cashflow: these dated flows never change sign, so they have no XIRR")
+    }
+    if changes > 1 {
+        throw("cashflow: these dated flows change sign " + str(changes) + " times; XIRR supports one sign change in v1 (Budan's theorem does not apply to day-count exponents). The planned Python escape hatch is in docs/ESCAPE-HATCHES.md")
+    }
+    let terms = shape.terms
+    let s0 = xsign(terms, 0, 1)
+    if s0 == 0 {
+        return {num: 0, den: 1}
+    }
+    let previous = {k: 0}
+    for k in UP_CANDIDATES {
+        let s = xsign(terms, k, 1)
+        if s == 0 {
+            return {num: k, den: 1}
+        }
+        if s != s0 {
+            return xbisect(terms, previous.k, k, s0)
+        }
+        previous["k"] = k
+    }
+    previous["k"] = 0
+    for k in DOWN_CANDIDATES {
+        let s = xsign(terms, k, 1)
+        if s == 0 {
+            return {num: k, den: 1}
+        }
+        if s != s0 {
+            return xbisect(terms, k, previous.k, s)
+        }
+        previous["k"] = k
+    }
+    throw("cashflow: no XIRR between -99.99% and 1,048,576% a year")
 }

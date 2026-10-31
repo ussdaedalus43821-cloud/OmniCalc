@@ -1,0 +1,14 @@
+# tools/calc_cli.nova - the amortization screen's calculation from the
+# command line, printed as JSON. tests/host/bridge_test.py compares this with
+# what the Python host gets through the embedding API, to prove the host
+# adds nothing of its own.
+#
+#   python3 vendor/Nova_Lang/novalang.py tools/calc_cli.nova 200000.00 6.5 360 0
+
+import "../src/app/amortization_screen.nova" as screen
+
+let given = args()
+if len(given) != 4 {
+    throw("usage: calc_cli.nova <principal> <annual rate %> <months> <extra per month>")
+}
+print(json.dumps(screen.calculate(given[0], given[1], given[2], given[3])))
