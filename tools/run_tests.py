@@ -17,11 +17,15 @@ A file fails if:
 Finding no test files at all is also a failure.
 
 Usage:
-    python3 tools/run_tests.py [--bootstrap] [path ...]
+    python3 tools/run_tests.py [--tree-walk] [--bootstrap] [path ...]
 
 --bootstrap runs each file through NovaLang's self-hosted interpreter
 (`novalang.py --bootstrap`). It is meant for the nightly CI job, not as a
 local gate.
+
+--tree-walk runs each file on NovaLang's tree-walking interpreter instead
+of its bytecode VM (`novalang.py --tree-walk`), to show the two engines
+agree on OmniCalc. It combines with --bootstrap.
 """
 
 import argparse
@@ -108,8 +112,10 @@ def check_output(completed, expected):
     return problems
 
 
-def run_file(path, expected, bootstrap):
+def run_file(path, expected, bootstrap, tree_walk=False):
     command = [sys.executable, NOVA_SCRIPT]
+    if tree_walk:
+        command.append("--tree-walk")
     if bootstrap:
         command.append("--bootstrap")
     command.append(path)
@@ -125,6 +131,8 @@ def run_file(path, expected, bootstrap):
 def main(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--bootstrap", action="store_true", help="use the self-hosted interpreter (nightly CI)")
+    parser.add_argument("--tree-walk", action="store_true",
+                        help="run on the tree-walking interpreter instead of the bytecode VM")
     parser.add_argument("paths", nargs="*", help="test files to run (default: every tests/**/*.nova)")
     options = parser.parse_args(argv)
 
@@ -145,7 +153,8 @@ def main(argv):
         modules_by_name.setdefault(name, []).append(module_path)
 
     mode = "--bootstrap" if options.bootstrap else "direct"
-    print("NovaLang {} ({}), {} test file(s)".format(version, mode, len(tests)))
+    engine = "tree-walker" if options.tree_walk else "bytecode VM"
+    print("NovaLang {} ({}, {}), {} test file(s)".format(version, mode, engine, len(tests)))
 
     failed = 0
     for path in tests:
@@ -154,7 +163,7 @@ def main(argv):
         completed = None
         started = time.monotonic()
         if not problems:
-            problems, completed = run_file(path, expected, options.bootstrap)
+            problems, completed = run_file(path, expected, options.bootstrap, options.tree_walk)
         elapsed = time.monotonic() - started
 
         if problems:

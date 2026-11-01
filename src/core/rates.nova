@@ -8,7 +8,8 @@
 # the cash-flow boundary.
 #
 # NovaLang's `/` returns a float for inexact integer division
-# (Nova_Lang/novalang.py:3258-3265), so this module uses only + - * // %.
+# (binary_operation, Nova_Lang/novalang.py:2959-2966 at v2.0.0), so this
+# module uses only + - * // %.
 
 import "./numbers.nova" as numbers
 
