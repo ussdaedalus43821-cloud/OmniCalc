@@ -9,7 +9,8 @@
 #
 # Conversions use Howard Hinnant's days_from_civil / civil_from_days
 # algorithms, which need floor division - exactly what NovaLang's `//`
-# does (Nova_Lang/novalang.py:3266-3269, "rounds towards negative infinity").
+# does (binary_operation, Nova_Lang/novalang.py:2967-2970 at v2.0.0,
+# "rounds towards negative infinity").
 
 import "./numbers.nova" as numbers
 

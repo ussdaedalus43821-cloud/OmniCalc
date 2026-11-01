@@ -6,25 +6,34 @@ v1 is a **Python-hosted desktop app with a Tkinter UI**. Web/mobile are out of s
 The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
 
 ## NovaLang rules
-- NovaLang version: **v1.1.0**, pinned as a git submodule at `vendor/Nova_Lang` (commit `02eabdb`).
-  At startup the host asserts that the interpreter version is `"1.1.0"` (`novalang.py:74`).
+- NovaLang version: **v2.0.0**, pinned as a git submodule at `vendor/Nova_Lang` (commit `bd5d502`).
+  At startup the host asserts that the interpreter version is `"2.0.0"` (`novalang.py:88`).
   Never patch the submodule; report upstream issues instead.
-- Runtime/compiler: the `novalang.py` tree-walking interpreter on CPython 3.7+. There is no compiler
-  (`Nova_Lang/README.md` "Quick start", "Self-hosting"). The host embeds it through the `Nova` class
-  (`README.md` "Embedding NovaLang in Python").
-- Build command: **none.** NovaLang has no build step.
+- Runtime: `novalang.py` on CPython 3.7+. Since 2.0.0 it compiles every program to bytecode and
+  runs it on a VM (`Nova_Lang/README.md` "Architecture"). The 1.1.0 tree-walking interpreter still
+  ships as the fallback and the reference the VM is tested against byte for byte: `--tree-walk` on
+  the command line, `Nova(engine="tree")` when embedding. The host embeds it through the `Nova`
+  class (`README.md` "Embedding NovaLang in Python") on the default engine, the VM.
+- **Type gate:** a program that imports modules (every OmniCalc façade and test) is type-checked
+  before it runs (`README.md` "Type annotations"). OmniCalc has no annotations, so there are no
+  contracts to break, and nothing is refused; the cost is startup time, about 0.2 s for the six
+  engines `app.warm_up()` builds. Each interpreter checks a module once.
+- Build command: **none.** Compiling happens at load time; there is no build step.
 - Test command: `python3 tools/run_tests.py` (runs the pin check, then every `tests/**/*.nova`),
   then `python3 -m unittest discover -s tests/host -p "*_test.py" -t .` for the host. Both run in
   CI.
   Nightly CI only: `python3 tools/run_tests.py --bootstrap` (about 50x slower; the dates test
   takes about 50 s).
-- Formatter/linter: **none exists** (`novalang.py:4154`, `--bootstrap` is the only flag).
-  Follow `Nova_Lang/CONTRIBUTING.md` "Style" by hand.
-- Do NOT invent NovaLang syntax or stdlib. Cite docs/examples. Known gaps and traps:
+- Toolchain: since 2.0.0 `novalang.py` has `--format` (formatter), `--check` (linter),
+  `--typecheck`, `--dis` (bytecode), `--tree-walk` and `--bootstrap` (`novalang.py:6366-6400`,
+  `README.md` "Toolchain: formatter & linter"). OmniCalc has not adopted the formatter or linter
+  yet; until it does, follow `Nova_Lang/CONTRIBUTING.md` "Style" by hand.
+- Do NOT invent NovaLang syntax or stdlib. Cite docs/examples. Known gaps and traps (each one
+  re-verified on v2.0.0 on both engines; none changed):
   - There is no `**` operator (use `pow()`), no bitwise ops, and no `null` literal.
   - `round()` is float half-even; never use it for money.
-  - `/` returns a float when the division is inexact (`novalang.py:3258-3265`). Integer code uses
-    only `+ - * // %`; `//` floors (`novalang.py:3266-3269`).
+  - `/` returns a float when the division is inexact (`binary_operation`, `novalang.py:2959-2966`).
+    Integer code uses only `+ - * // %`; `//` floors (`novalang.py:2967-2970`).
   - `type()` reports `"number"` for both ints and floats. Floats can be NaN or inf (`num()` of a
     long decimal string returns `inf`, and `json.loads("NaN")` returns `nan`), and `floor()` on
     either **crashes the interpreter** with a raw Python error. All whole-number checks go
@@ -421,7 +430,9 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
 
 ## Performance rule
 - UI-path budget: **100 ms per button press**, roughly 10k interpreter steps (interpreter speed is
-  about 162k steps/s, `Nova_Lang/README.md` "ECS & particle engine").
+  about 162k steps/s, `Nova_Lang/README.md` "ECS & particle engine"; measured on 1.1.0's
+  tree-walker. The 2.0.0 VM runs NovaLang's loop benchmark about 2.6x faster, and OmniCalc's
+  screens 1.2-1.6x faster, so the step estimate is conservative).
 - **Calculate-path median targets** (decided after M7):
   - **under 70 ms for single-schedule screens** (amortization, savings, refinance, debt payoff);
   - **under 90 ms for portfolio screens** (investments).
@@ -461,7 +472,10 @@ The decision record is in `docs/NOVALANG-QUESTIONS.md` ("Decisions 2026-10-31").
   - `n` ≠ `expect`.
   Finding no test files at all is also a failure. Nothing is skipped.
 - The runner first calls `src/host/nova_runtime.assert_pinned()`. It checks that the
-  interpreter reports `__version__ == "1.1.0"` and that the submodule HEAD is `02eabdb...`.
+  interpreter reports `__version__ == "2.0.0"` and that the submodule HEAD is `bd5d502...`.
+- **Engine parity:** `python3 tools/run_tests.py --tree-walk` runs every test on the
+  tree-walker instead of the VM. Both must pass with identical output; it was run for the
+  2.0.0 upgrade.
 - Tests run on every change. `--bootstrap` is a separate nightly CI job, not a gate.
 - All core finance math must have deterministic golden tests with known values (`tests/finance`).
 
@@ -601,6 +615,12 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
     - units: offset sign, inverted factors, case-insensitive lookup, float arithmetic;
     - datetime: inclusive counting, the 30/360 D1 condition, single-basis act/act, months rounded
       up, the weekday origin.
+- **NovaLang 2.0.0 upgrade.** ✅ The submodule moved from v1.1.0 (`02eabdb`) to v2.0.0
+  (`bd5d502`), the bytecode VM. All 740 NovaLang checks and 18 host tests pass on the VM and on the
+  tree-walker, with byte-identical output from every test file. Screens are 1.2-1.6x faster
+  (median; PR description has the table); startup is slower (see "Type gate" above). The dry
+  run found NovaLang's type gate re-checking shared modules (159 checks for 37 loads); it was
+  fixed upstream before the pin moved.
 - **Later — compound interest** (`investments`).
 - **Later — Scientific + units** (`core/math`).
 - **Later — the full Tkinter host:** screens with formula/assumptions, CSV export, a terminal debug
@@ -614,6 +634,11 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
     unchanged code, ran 1.74–1.82× slower on one runner than on another. So each run also times a
     fixed NovaLang workload, and the gate compares each screen's **median ÷ calibration**
     (`relative`), alerting at +20%.
+  - **After the 2.0.0 upgrade** the screens got faster but the calibration workload did not
+    (its `acc["total"] = ...` index assignment has no VM fast path; it runs at tree-walker
+    speed), so every relative value dropped (amortization 0.28 → 0.16 here). The old baseline
+    cannot false-alarm, but it would only alert once a screen got about 2x slower. Re-baseline
+    from CI after the upgrade merges.
   - The relative values carry across machines: CI 0.360 / 0.140 / 0.533 / 0.123 vs this container
     0.37 / 0.15 / 0.57 / 0.13, with raw speeds 1.5× apart. The perf job also
     runs on push, but only reports there (`continue-on-error`). To re-baseline, run the workflow
