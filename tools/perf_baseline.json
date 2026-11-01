@@ -1,35 +1,56 @@
 {
   "python": "3.12.15",
   "machine": "x86_64",
-  "calibration_ms": 141.61,
+  "calibration_ms": 140.46,
   "screens": {
     "amortization": {
-      "median_ms": 50.74,
-      "p90_ms": 51.23,
-      "max_ms": 52.11,
+      "median_ms": 50.37,
+      "p90_ms": 50.65,
+      "max_ms": 50.7,
       "runs": 20,
-      "relative": 0.358
+      "relative": 0.359
     },
     "savings": {
-      "median_ms": 19.3,
-      "p90_ms": 22.57,
-      "max_ms": 28.97,
+      "median_ms": 19.07,
+      "p90_ms": 19.25,
+      "max_ms": 19.32,
       "runs": 20,
       "relative": 0.136
     },
     "refinance": {
-      "median_ms": 74.39,
-      "p90_ms": 75.01,
-      "max_ms": 76.15,
+      "median_ms": 72.67,
+      "p90_ms": 73.12,
+      "max_ms": 74.1,
       "runs": 20,
-      "relative": 0.525
+      "relative": 0.517
+    },
+    "investments": {
+      "median_ms": 23.19,
+      "p90_ms": 23.26,
+      "max_ms": 23.34,
+      "runs": 20,
+      "relative": 0.165
     },
     "debt_payoff": {
-      "median_ms": 17.01,
-      "p90_ms": 17.72,
-      "max_ms": 18.88,
+      "median_ms": 16.44,
+      "p90_ms": 16.64,
+      "max_ms": 16.81,
       "runs": 20,
-      "relative": 0.12
+      "relative": 0.117
+    },
+    "math": {
+      "median_ms": 14.3,
+      "p90_ms": 14.52,
+      "max_ms": 15.37,
+      "runs": 20,
+      "relative": 0.102
+    },
+    "investments_20": {
+      "median_ms": 130.23,
+      "p90_ms": 130.78,
+      "max_ms": 131.57,
+      "runs": 20,
+      "relative": 0.927
     }
   }
 }
