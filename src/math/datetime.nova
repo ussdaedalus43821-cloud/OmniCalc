@@ -1,0 +1,225 @@
+# src/math/datetime.nova - date arithmetic beyond src/core/dates.nova:
+# durations, business days with a holiday list, and day-count conventions.
+# Reference: tests/math/gen_datetime_vectors.py (Python datetime + fractions).
+#
+# Dates are dates.nova structs {y, m, d, serial}; holidays are a list of
+# serials. Conventions:
+#   add_duration: years*12 + months first (day clamped to month-end, as
+#     dates.add_months), then days; negative fields subtract.
+#   duration_between(a, b): the most whole months m with add_months(a, m) <= b,
+#     then the remaining days; {years: m // 12, months: m % 12, days}. For
+#     a > b, the reverse duration with every field negated.
+#   weekday: 0 = Monday ... 6 = Sunday (serial 0, 1970-01-01, is a Thursday).
+#   Business days are Monday-Friday not in the holiday list.
+#     add_business_days(d, n): Excel WORKDAY - d itself is not counted, n = 0
+#     returns d. business_days_between(a, b): business days in (a, b]
+#     (Excel NETWORKDAYS counts [a, b]); negative when a > b.
+#   day_count(start, end, convention), start <= end, an exact year fraction
+#   {num, den}:
+#     "act/365f"     actual days / 365
+#     "act/360"      actual days / 360
+#     "30/360"       ISDA 2006 4.16(f) bond basis: D1 = 30 if d1 = 31,
+#                    D2 = 30 if d2 = 31 and D1 = 30 (no February rule)
+#     "30e/360"      ISDA 2006 4.16(g) Eurobond: D1 = min(d1, 30), D2 = min(d2, 30)
+#     "act/act-isda" days in leap years / 366 + days in other years / 365
+
+import "../core/numbers.nova" as numbers
+import "../core/dates.nova" as dates
+
+let THURSDAY = 3
+let CONVENTIONS = ["act/365f", "act/360", "30/360", "30e/360", "act/act-isda"]
+
+def fail(message) {
+    throw("datetime: " + message)
+}
+
+def whole(value, what) {
+    return numbers.require_whole(value, what, "datetime")
+}
+
+def gcd(a, b) {
+    let x = abs(a)
+    let y = abs(b)
+    while y != 0 {
+        let r = x % y
+        x = y
+        y = r
+    }
+    return x
+}
+
+def fraction(n, d) {
+    let g = gcd(n, d)
+    if g == 0 {
+        return {num: 0, den: 1}
+    }
+    return {num: n // g, den: d // g}
+}
+
+export def weekday(date) {
+    dates.check_date(date)
+    return (date.serial + THURSDAY) % 7
+}
+
+# {years, months, days} (any field may be omitted or negative) added to date.
+export def add_duration(date, duration) {
+    dates.check_date(date)
+    if type(duration) != "dict" {
+        fail("a duration is {years, months, days}, got " + str(duration))
+    }
+    let parts = {years: 0, months: 0, days: 0}
+    for name in ["years", "months", "days"] {
+        if name in duration {
+            parts[name] = whole(duration[name], name)
+        }
+    }
+    let shifted = dates.add_months(date, parts.years * 12 + parts.months)
+    return dates.add_days(shifted, parts.days)
+}
+
+export def duration_between(a, b) {
+    dates.check_date(a)
+    dates.check_date(b)
+    if a.serial > b.serial {
+        let backwards = duration_between(b, a)
+        return {years: 0 - backwards.years, months: 0 - backwards.months, days: 0 - backwards.days}
+    }
+    let months = (b.y - a.y) * 12 + (b.m - a.m)
+    while months > 0 and dates.add_months(a, months).serial > b.serial {
+        months = months - 1
+    }
+    let rest = b.serial - dates.add_months(a, months).serial
+    return {years: months // 12, months: months % 12, days: rest}
+}
+
+# holidays (a list of serials) -> a lookup dict.
+def holiday_set(holidays) {
+    if type(holidays) != "list" {
+        fail("holidays must be a list of date serials")
+    }
+    let lookup = {}
+    for h in holidays {
+        lookup[str(whole(h, "a holiday serial"))] = true
+    }
+    return lookup
+}
+
+def business_serial(serial, lookup) {
+    return (serial + THURSDAY) % 7 < 5 and not (str(serial) in lookup)
+}
+
+export def is_business_day(date, holidays) {
+    dates.check_date(date)
+    return business_serial(date.serial, holiday_set(holidays))
+}
+
+export def add_business_days(date, n, holidays) {
+    dates.check_date(date)
+    let lookup = holiday_set(holidays)
+    let count = whole(n, "n")
+    let direction = 1
+    if count < 0 {
+        direction = -1
+    }
+    let remaining = abs(count)
+    let serial = date.serial
+    while remaining > 0 {
+        serial = serial + direction
+        if business_serial(serial, lookup) {
+            remaining = remaining - 1
+        }
+    }
+    return dates.from_serial(serial)
+}
+
+# Weekdays (Mon-Fri) among serials first+1 .. last, by whole weeks plus a
+# remainder - no day-by-day loop over long ranges.
+def weekdays_after(first, last) {
+    let span = last - first
+    let full_weeks = span // 7
+    let count = full_weeks * 5
+    for serial = first + full_weeks * 7 + 1 to last {
+        if (serial + THURSDAY) % 7 < 5 {
+            count = count + 1
+        }
+    }
+    return count
+}
+
+export def business_days_between(a, b, holidays) {
+    dates.check_date(a)
+    dates.check_date(b)
+    if a.serial > b.serial {
+        return 0 - business_days_between(b, a, holidays)
+    }
+    let lookup = holiday_set(holidays)
+    let count = weekdays_after(a.serial, b.serial)
+    for key in keys(lookup) {
+        let h = num(key)
+        if h > a.serial and h <= b.serial and (h + THURSDAY) % 7 < 5 {
+            count = count - 1
+        }
+    }
+    return count
+}
+
+export def day_count(start, end, convention) {
+    dates.check_date(start)
+    dates.check_date(end)
+    if not (convention in CONVENTIONS) {
+        fail("unknown day-count convention \"" + str(convention) + "\"; use one of " + join(CONVENTIONS, ", "))
+    }
+    if start.serial > end.serial {
+        fail("day_count needs start <= end")
+    }
+    let days = end.serial - start.serial
+    if convention == "act/365f" {
+        return fraction(days, 365)
+    }
+    if convention == "act/360" {
+        return fraction(days, 360)
+    }
+    if convention == "30/360" or convention == "30e/360" {
+        let d1 = start.d
+        let d2 = end.d
+        if convention == "30/360" {
+            if d1 == 31 {
+                d1 = 30
+            }
+            if d2 == 31 and d1 == 30 {
+                d2 = 30
+            }
+        } else {
+            if d1 > 30 {
+                d1 = 30
+            }
+            if d2 > 30 {
+                d2 = 30
+            }
+        }
+        return fraction(360 * (end.y - start.y) + 30 * (end.m - start.m) + (d2 - d1), 360)
+    }
+    # act/act-isda: split at each 1 January.
+    let leap_days = 0
+    let other_days = 0
+    for year = start.y to end.y {
+        let lo = start.serial
+        let year_start = dates.from_civil(year, 1, 1).serial
+        if year_start > lo {
+            lo = year_start
+        }
+        let hi = end.serial
+        let next_start = dates.from_civil(year + 1, 1, 1).serial
+        if next_start < hi {
+            hi = next_start
+        }
+        if hi > lo {
+            if dates.is_leap_year(year) {
+                leap_days = leap_days + (hi - lo)
+            } else {
+                other_days = other_days + (hi - lo)
+            }
+        }
+    }
+    return fraction(leap_days * 365 + other_days * 366, 366 * 365)
+}

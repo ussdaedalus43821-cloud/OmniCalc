@@ -1,0 +1,61 @@
+# module: datetime
+# expect: 69
+#
+# Every case in tests/math/vectors/datetime.json (tests/math/gen_datetime_vectors.py:
+# Python datetime + fractions, no shared code), plus rejected inputs.
+
+import "../../tools/check.nova" as t
+import "../../src/core/dates.nova" as dates
+import "../../src/math/datetime.nova" as dt
+
+let vectors = json.loads(read("tests/math/vectors/datetime.json"))
+let cases = vectors.cases
+
+def on(ymd) {
+    return dates.from_civil(ymd[0], ymd[1], ymd[2])
+}
+def ymd_of(date) {
+    return [date.y, date.m, date.d]
+}
+let holidays = []
+for h in vectors.holidays {
+    append(holidays, on(h).serial)
+}
+
+for c in cases.weekday {
+    t.check("weekday " + str(c.date), dt.weekday(on(c.date)), c.weekday)
+}
+for c in cases.add_duration {
+    t.check("add_duration: " + c.note, ymd_of(dt.add_duration(on(c.date), {years: c.years, months: c.months, days: c.days})), c.result)
+}
+for c in cases.duration_between {
+    let got = dt.duration_between(on(c.a), on(c.b))
+    t.check("duration_between: " + c.note, [got.years, got.months, got.days], c.result)
+}
+for c in cases.is_business_day {
+    t.check("is_business_day: " + c.note, dt.is_business_day(on(c.date), holidays), c.result)
+}
+for c in cases.add_business_days {
+    t.check("add_business_days: " + c.note, ymd_of(dt.add_business_days(on(c.date), c.n, holidays)), c.result)
+}
+for c in cases.business_days_between {
+    t.check("business_days_between: " + c.note, dt.business_days_between(on(c.a), on(c.b), holidays), c.result)
+}
+for c in cases.day_count {
+    let got = dt.day_count(on(c.a), on(c.b), c.convention)
+    t.check("day_count " + c.convention + " " + str(c.a) + " -> " + str(c.b), [got.num, got.den], [c.num, c.den])
+}
+
+# ---- rejected inputs
+def unknown_convention() { dt.day_count(on([2024, 1, 1]), on([2024, 2, 1]), "30/360us") }
+t.check_throws("an unknown convention lists the valid ones", unknown_convention, "use one of act/365f, act/360, 30/360, 30e/360, act/act-isda")
+def reversed_count() { dt.day_count(on([2024, 2, 1]), on([2024, 1, 1]), "act/360") }
+t.check_throws("day_count needs start <= end", reversed_count, "start <= end")
+def fractional_months() { dt.add_duration(on([2024, 1, 1]), {months: 1.5}) }
+t.check_throws("a fractional duration is rejected", fractional_months, "months must be a whole number")
+def bad_holidays() { dt.is_business_day(on([2024, 1, 1]), "2024-01-01") }
+t.check_throws("holidays must be a list of serials", bad_holidays, "holidays must be a list")
+def bad_date() { dt.weekday({y: 2024, m: 1, d: 1, serial: 0}) }
+t.check_throws("an inconsistent date struct is rejected", bad_date, "does not match")
+
+t.finish()

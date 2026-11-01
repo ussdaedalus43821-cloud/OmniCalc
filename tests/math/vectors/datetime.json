@@ -1,0 +1,993 @@
+{
+ "holidays": [
+  [
+   2024,
+   1,
+   1
+  ],
+  [
+   2024,
+   1,
+   15
+  ],
+  [
+   2024,
+   2,
+   19
+  ],
+  [
+   2024,
+   5,
+   27
+  ],
+  [
+   2024,
+   6,
+   19
+  ],
+  [
+   2024,
+   7,
+   4
+  ],
+  [
+   2024,
+   9,
+   2
+  ],
+  [
+   2024,
+   10,
+   14
+  ],
+  [
+   2024,
+   11,
+   11
+  ],
+  [
+   2024,
+   11,
+   28
+  ],
+  [
+   2024,
+   12,
+   25
+  ]
+ ],
+ "cases": {
+  "weekday": [
+   {
+    "date": [
+     1970,
+     1,
+     1
+    ],
+    "weekday": 3
+   },
+   {
+    "date": [
+     2024,
+     2,
+     29
+    ],
+    "weekday": 3
+   },
+   {
+    "date": [
+     2026,
+     10,
+     31
+    ],
+    "weekday": 5
+   },
+   {
+    "date": [
+     2000,
+     1,
+     1
+    ],
+    "weekday": 5
+   },
+   {
+    "date": [
+     1969,
+     12,
+     31
+    ],
+    "weekday": 2
+   }
+  ],
+  "add_duration": [
+   {
+    "date": [
+     2024,
+     1,
+     31
+    ],
+    "years": 0,
+    "months": 1,
+    "days": 0,
+    "result": [
+     2024,
+     2,
+     29
+    ],
+    "note": "clamps to Feb 29 in a leap year"
+   },
+   {
+    "date": [
+     2023,
+     1,
+     31
+    ],
+    "years": 0,
+    "months": 1,
+    "days": 0,
+    "result": [
+     2023,
+     2,
+     28
+    ],
+    "note": "clamps to Feb 28"
+   },
+   {
+    "date": [
+     2024,
+     2,
+     29
+    ],
+    "years": 1,
+    "months": 0,
+    "days": 0,
+    "result": [
+     2025,
+     2,
+     28
+    ],
+    "note": "a leap day plus a year clamps to Feb 28"
+   },
+   {
+    "date": [
+     2024,
+     3,
+     31
+    ],
+    "years": 0,
+    "months": -1,
+    "days": 0,
+    "result": [
+     2024,
+     2,
+     29
+    ],
+    "note": "minus a month clamps to Feb 29"
+   },
+   {
+    "date": [
+     2024,
+     1,
+     31
+    ],
+    "years": 0,
+    "months": 1,
+    "days": 1,
+    "result": [
+     2024,
+     3,
+     1
+    ],
+    "note": "months first, then days: Feb 29 + 1 = Mar 1"
+   },
+   {
+    "date": [
+     2024,
+     1,
+     15
+    ],
+    "years": 1,
+    "months": 2,
+    "days": 10,
+    "result": [
+     2025,
+     3,
+     25
+    ],
+    "note": "combined"
+   },
+   {
+    "date": [
+     2024,
+     3,
+     1
+    ],
+    "years": 0,
+    "months": 0,
+    "days": -1,
+    "result": [
+     2024,
+     2,
+     29
+    ],
+    "note": "minus a day crosses into a leap February"
+   },
+   {
+    "date": [
+     2024,
+     12,
+     31
+    ],
+    "years": 0,
+    "months": 0,
+    "days": 1,
+    "result": [
+     2025,
+     1,
+     1
+    ],
+    "note": "crosses a year"
+   },
+   {
+    "date": [
+     2024,
+     5,
+     31
+    ],
+    "years": -2,
+    "months": -3,
+    "days": -40,
+    "result": [
+     2022,
+     1,
+     19
+    ],
+    "note": "all negative"
+   }
+  ],
+  "duration_between": [
+   {
+    "a": [
+     2024,
+     1,
+     31
+    ],
+    "b": [
+     2024,
+     2,
+     29
+    ],
+    "result": [
+     0,
+     1,
+     0
+    ],
+    "note": "exactly one month (clamped)"
+   },
+   {
+    "a": [
+     2024,
+     1,
+     31
+    ],
+    "b": [
+     2024,
+     3,
+     1
+    ],
+    "result": [
+     0,
+     1,
+     1
+    ],
+    "note": "one month and one day"
+   },
+   {
+    "a": [
+     2020,
+     2,
+     29
+    ],
+    "b": [
+     2024,
+     2,
+     28
+    ],
+    "result": [
+     3,
+     11,
+     30
+    ],
+    "note": "leap day to the day before"
+   },
+   {
+    "a": [
+     2023,
+     5,
+     15
+    ],
+    "b": [
+     2026,
+     10,
+     31
+    ],
+    "result": [
+     3,
+     5,
+     16
+    ],
+    "note": "years, months and days"
+   },
+   {
+    "a": [
+     2024,
+     6,
+     10
+    ],
+    "b": [
+     2024,
+     6,
+     10
+    ],
+    "result": [
+     0,
+     0,
+     0
+    ],
+    "note": "same day"
+   },
+   {
+    "a": [
+     2026,
+     10,
+     31
+    ],
+    "b": [
+     2023,
+     5,
+     15
+    ],
+    "result": [
+     -3,
+     -5,
+     -16
+    ],
+    "note": "reversed: every field negated"
+   }
+  ],
+  "is_business_day": [
+   {
+    "date": [
+     2024,
+     7,
+     4
+    ],
+    "result": false,
+    "note": "a holiday"
+   },
+   {
+    "date": [
+     2024,
+     7,
+     6
+    ],
+    "result": false,
+    "note": "a Saturday"
+   },
+   {
+    "date": [
+     2024,
+     7,
+     8
+    ],
+    "result": true,
+    "note": "a Monday"
+   },
+   {
+    "date": [
+     2024,
+     7,
+     7
+    ],
+    "result": false,
+    "note": "a Sunday"
+   }
+  ],
+  "add_business_days": [
+   {
+    "date": [
+     2024,
+     12,
+     20
+    ],
+    "n": 3,
+    "result": [
+     2024,
+     12,
+     26
+    ],
+    "note": "Fri + 3 skips the weekend and Dec 25"
+   },
+   {
+    "date": [
+     2024,
+     7,
+     5
+    ],
+    "n": -1,
+    "result": [
+     2024,
+     7,
+     3
+    ],
+    "note": "back over the Jul 4 holiday"
+   },
+   {
+    "date": [
+     2024,
+     7,
+     6
+    ],
+    "n": 0,
+    "result": [
+     2024,
+     7,
+     6
+    ],
+    "note": "n = 0 returns the date itself, even a Saturday (Excel WORKDAY)"
+   },
+   {
+    "date": [
+     2024,
+     7,
+     6
+    ],
+    "n": 1,
+    "result": [
+     2024,
+     7,
+     8
+    ],
+    "note": "from a Saturday, the next business day"
+   },
+   {
+    "date": [
+     2024,
+     1,
+     1
+    ],
+    "n": 250,
+    "result": [
+     2024,
+     12,
+     30
+    ],
+    "note": "250 business days into 2024"
+   },
+   {
+    "date": [
+     2024,
+     11,
+     29
+    ],
+    "n": -20,
+    "result": [
+     2024,
+     10,
+     30
+    ],
+    "note": "20 back across Thanksgiving and Veterans Day"
+   }
+  ],
+  "business_days_between": [
+   {
+    "a": [
+     2024,
+     1,
+     1
+    ],
+    "b": [
+     2024,
+     12,
+     31
+    ],
+    "result": 251,
+    "note": "all of 2024: 262 weekdays - 11 holidays"
+   },
+   {
+    "a": [
+     2024,
+     7,
+     3
+    ],
+    "b": [
+     2024,
+     7,
+     8
+    ],
+    "result": 2,
+    "note": "(Wed, Mon]: Thu is a holiday"
+   },
+   {
+    "a": [
+     2024,
+     7,
+     8
+    ],
+    "b": [
+     2024,
+     7,
+     8
+    ],
+    "result": 0,
+    "note": "empty interval"
+   },
+   {
+    "a": [
+     2024,
+     7,
+     8
+    ],
+    "b": [
+     2024,
+     7,
+     3
+    ],
+    "result": -2,
+    "note": "reversed: negative"
+   }
+  ],
+  "day_count": [
+   {
+    "a": [
+     2023,
+     1,
+     31
+    ],
+    "b": [
+     2023,
+     3,
+     31
+    ],
+    "convention": "act/365f",
+    "num": 59,
+    "den": 365
+   },
+   {
+    "a": [
+     2023,
+     1,
+     31
+    ],
+    "b": [
+     2023,
+     3,
+     31
+    ],
+    "convention": "act/360",
+    "num": 59,
+    "den": 360
+   },
+   {
+    "a": [
+     2023,
+     1,
+     31
+    ],
+    "b": [
+     2023,
+     3,
+     31
+    ],
+    "convention": "30/360",
+    "num": 1,
+    "den": 6
+   },
+   {
+    "a": [
+     2023,
+     1,
+     31
+    ],
+    "b": [
+     2023,
+     3,
+     31
+    ],
+    "convention": "30e/360",
+    "num": 1,
+    "den": 6
+   },
+   {
+    "a": [
+     2023,
+     1,
+     31
+    ],
+    "b": [
+     2023,
+     3,
+     31
+    ],
+    "convention": "act/act-isda",
+    "num": 59,
+    "den": 365
+   },
+   {
+    "a": [
+     2024,
+     2,
+     29
+    ],
+    "b": [
+     2024,
+     8,
+     31
+    ],
+    "convention": "act/365f",
+    "num": 184,
+    "den": 365
+   },
+   {
+    "a": [
+     2024,
+     2,
+     29
+    ],
+    "b": [
+     2024,
+     8,
+     31
+    ],
+    "convention": "act/360",
+    "num": 23,
+    "den": 45
+   },
+   {
+    "a": [
+     2024,
+     2,
+     29
+    ],
+    "b": [
+     2024,
+     8,
+     31
+    ],
+    "convention": "30/360",
+    "num": 91,
+    "den": 180
+   },
+   {
+    "a": [
+     2024,
+     2,
+     29
+    ],
+    "b": [
+     2024,
+     8,
+     31
+    ],
+    "convention": "30e/360",
+    "num": 181,
+    "den": 360
+   },
+   {
+    "a": [
+     2024,
+     2,
+     29
+    ],
+    "b": [
+     2024,
+     8,
+     31
+    ],
+    "convention": "act/act-isda",
+    "num": 92,
+    "den": 183
+   },
+   {
+    "a": [
+     2023,
+     12,
+     15
+    ],
+    "b": [
+     2025,
+     1,
+     15
+    ],
+    "convention": "act/365f",
+    "num": 397,
+    "den": 365
+   },
+   {
+    "a": [
+     2023,
+     12,
+     15
+    ],
+    "b": [
+     2025,
+     1,
+     15
+    ],
+    "convention": "act/360",
+    "num": 397,
+    "den": 360
+   },
+   {
+    "a": [
+     2023,
+     12,
+     15
+    ],
+    "b": [
+     2025,
+     1,
+     15
+    ],
+    "convention": "30/360",
+    "num": 13,
+    "den": 12
+   },
+   {
+    "a": [
+     2023,
+     12,
+     15
+    ],
+    "b": [
+     2025,
+     1,
+     15
+    ],
+    "convention": "30e/360",
+    "num": 13,
+    "den": 12
+   },
+   {
+    "a": [
+     2023,
+     12,
+     15
+    ],
+    "b": [
+     2025,
+     1,
+     15
+    ],
+    "convention": "act/act-isda",
+    "num": 396,
+    "den": 365
+   },
+   {
+    "a": [
+     2024,
+     1,
+     31
+    ],
+    "b": [
+     2024,
+     2,
+     29
+    ],
+    "convention": "act/365f",
+    "num": 29,
+    "den": 365
+   },
+   {
+    "a": [
+     2024,
+     1,
+     31
+    ],
+    "b": [
+     2024,
+     2,
+     29
+    ],
+    "convention": "act/360",
+    "num": 29,
+    "den": 360
+   },
+   {
+    "a": [
+     2024,
+     1,
+     31
+    ],
+    "b": [
+     2024,
+     2,
+     29
+    ],
+    "convention": "30/360",
+    "num": 29,
+    "den": 360
+   },
+   {
+    "a": [
+     2024,
+     1,
+     31
+    ],
+    "b": [
+     2024,
+     2,
+     29
+    ],
+    "convention": "30e/360",
+    "num": 29,
+    "den": 360
+   },
+   {
+    "a": [
+     2024,
+     1,
+     31
+    ],
+    "b": [
+     2024,
+     2,
+     29
+    ],
+    "convention": "act/act-isda",
+    "num": 29,
+    "den": 366
+   },
+   {
+    "a": [
+     2020,
+     2,
+     29
+    ],
+    "b": [
+     2021,
+     2,
+     28
+    ],
+    "convention": "act/365f",
+    "num": 1,
+    "den": 1
+   },
+   {
+    "a": [
+     2020,
+     2,
+     29
+    ],
+    "b": [
+     2021,
+     2,
+     28
+    ],
+    "convention": "act/360",
+    "num": 73,
+    "den": 72
+   },
+   {
+    "a": [
+     2020,
+     2,
+     29
+    ],
+    "b": [
+     2021,
+     2,
+     28
+    ],
+    "convention": "30/360",
+    "num": 359,
+    "den": 360
+   },
+   {
+    "a": [
+     2020,
+     2,
+     29
+    ],
+    "b": [
+     2021,
+     2,
+     28
+    ],
+    "convention": "30e/360",
+    "num": 359,
+    "den": 360
+   },
+   {
+    "a": [
+     2020,
+     2,
+     29
+    ],
+    "b": [
+     2021,
+     2,
+     28
+    ],
+    "convention": "act/act-isda",
+    "num": 133283,
+    "den": 133590
+   },
+   {
+    "a": [
+     2024,
+     6,
+     30
+    ],
+    "b": [
+     2024,
+     12,
+     31
+    ],
+    "convention": "act/365f",
+    "num": 184,
+    "den": 365
+   },
+   {
+    "a": [
+     2024,
+     6,
+     30
+    ],
+    "b": [
+     2024,
+     12,
+     31
+    ],
+    "convention": "act/360",
+    "num": 23,
+    "den": 45
+   },
+   {
+    "a": [
+     2024,
+     6,
+     30
+    ],
+    "b": [
+     2024,
+     12,
+     31
+    ],
+    "convention": "30/360",
+    "num": 1,
+    "den": 2
+   },
+   {
+    "a": [
+     2024,
+     6,
+     30
+    ],
+    "b": [
+     2024,
+     12,
+     31
+    ],
+    "convention": "30e/360",
+    "num": 1,
+    "den": 2
+   },
+   {
+    "a": [
+     2024,
+     6,
+     30
+    ],
+    "b": [
+     2024,
+     12,
+     31
+    ],
+    "convention": "act/act-isda",
+    "num": 92,
+    "den": 183
+   }
+  ]
+ }
+}

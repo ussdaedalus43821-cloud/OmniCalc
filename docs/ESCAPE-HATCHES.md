@@ -232,6 +232,48 @@ These were checked against the budget and stay in NovaLang. Re-measure if inputs
 - Tried and rejected: stopping Illinois once XNPV is under half a minor unit. It lost XIRR
   precision on small amounts, and the reference tests failed.
 
+## NovaLang limitations found in M8 (math engine) — confirmed by probing v1.1.0
+
+None of these needs an escape hatch: each is worked around in NovaLang. They're recorded so nobody
+rediscovers them.
+
+- **No `exp`, `asin`, `acos`, `atan` or hyperbolic built-ins.** Only `sin cos tan ln log10 sqrt
+  pow` exist (`novalang.py` builtins). Workaround in `src/math/scientific.nova`:
+  - `exp(x) = pow(E, x)`;
+  - `atan` by argument reduction plus its Taylor series;
+  - `asin`/`acos` from `atan`, and the hyperbolics from `exp`.
+  Checked against Python's `math` module at a relative 1e-14.
+- **`log` is the stderr logger, not a logarithm.** `log(8, 2)` *prints* "8 2" and returns
+  nothing, so a mistaken call is silent. The evaluator's `log(x, base)` is our own function.
+  NovaLang code must never call the built-in `log` for maths.
+- **No exponent literals.** NovaLang source can't write `1e3`, and `num("1e3")` is rejected. The
+  expression tokenizer reads exponents itself, exactly.
+- **No float formatting control.** `str(float)` is Python's `repr`, and it prints large floats
+  as all their binary digits: `str(pow(10.0, 25))` is `"10000000000000000905969664"`. Display is
+  a routine of our own:
+  - convert the float to its exact binary rational (doubling is exact);
+  - round half-up to 12 significant figures with integer arithmetic.
+  This matches Python's `Decimal(float)` digit for digit.
+- **Precision ceiling:** transcendentals are binary doubles (about 15–17 significant digits),
+  which is why the display uses 12.
+- **`PI` and `E` don't exist inside imported modules** (found while implementing). They're
+  globals of the top-level script only. A module function can call built-ins like `sqrt`, but
+  `PI` is "undefined name". `scientific.nova` defines `MATH_PI = 3.141592653589793` and
+  `MATH_E = 2.718281828459045`, verified bit-identical to the built-ins.
+- **`json` doesn't exist inside imported modules either**, the same as `PI` and `E` (found
+  while implementing `units.nova`). So `units.load` takes the *parsed* table, and the host (or a
+  top-level script) does `json.load`/`json.loads`. Decoding sits with file I/O on the host side of
+  the boundary.
+- **Units cost:** the first load validates 84 units in 22 ms and is memoized; a press is about
+  1.5 ms. The **Math tab** takes 12.5 ms median through the bridge, and 23.9 ms in the GUI
+  including drawing.
+- **Evaluator cost** (measured after implementation; unchecked core not needed):
+  - typical expressions take 2–4 ms;
+  - `1000!` takes 3.4 ms and `2^4096` 1.2 ms;
+  - cost grows about 0.06 ms per character, so a 479-character expression takes about 28 ms.
+  The 500-character limit therefore bounds the worst case at roughly 30–40 ms, inside the 70 ms
+  Math-tab target.
+
 ## Known approximations
 
 Behavior that is deliberately not exact.
