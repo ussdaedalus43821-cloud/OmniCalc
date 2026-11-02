@@ -649,6 +649,7 @@ Scientific, units, TVM, amortization, compound interest, amortization CSV export
   - The relative values carry across machines: CI 0.360 / 0.140 / 0.533 / 0.123 vs this container
     0.37 / 0.15 / 0.57 / 0.13, with raw speeds 1.5× apart. The perf job also
     runs on push, but only reports there (`continue-on-error`). To re-baseline, run the workflow
-    with `update_baseline: true`, which opens a PR. That needs the workflow on the default branch
+    with `update_baseline: true`, which opens a PR, also when the run fails against the old
+    baseline (after a NovaLang upgrade it always will). That needs the workflow on the default branch
     and "Allow GitHub Actions to create and approve pull requests" enabled; otherwise, copy the
     JSON from the job log.
