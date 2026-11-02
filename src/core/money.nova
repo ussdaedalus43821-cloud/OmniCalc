@@ -7,11 +7,11 @@
 # formatting job is minor + scale + currency -> string.
 #
 # NovaLang has one `number` type covering ints and floats
-# (Lexer.read_number, Nova_Lang/novalang.py:451-465 at v2.0.0). A
+# (Lexer.read_number, Nova_Lang/novalang.py:454-468 at v2.0.1). A
 # fractional, NaN or infinite value is rejected (src/core/numbers.nova); a
 # whole-valued float is normalized to an int with floor(). Only + - * // %
 # are used, never `/`, which returns a float for inexact division
-# (binary_operation, Nova_Lang/novalang.py:2959-2966 at v2.0.0).
+# (binary_operation, Nova_Lang/novalang.py:2962-2969 at v2.0.1).
 #
 # Rounding happens only in round_half_up(). multiply_rate_exact() is the
 # unrounded product, for solvers and any arithmetic that continues;
