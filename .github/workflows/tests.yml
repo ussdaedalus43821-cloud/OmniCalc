@@ -83,10 +83,16 @@ jobs:
       - name: Open a PR that replaces the baseline
         # Needs "Allow GitHub Actions to create and approve pull requests"
         # (Settings > Actions > General) and the workflow on the default branch.
-        if: github.event_name == 'workflow_dispatch' && inputs.update_baseline
+        # Runs even when the timing step failed: it fails when the numbers
+        # moved against the old baseline, which is exactly when a new one is
+        # needed (a NovaLang upgrade moves every relative value). perf.py
+        # writes perf-results.json in full before it compares, so a file
+        # here is a complete run; a crash while timing leaves none.
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && inputs.update_baseline }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          test -f perf-results.json || { echo "no perf-results.json - the timing step did not finish"; exit 1; }
           branch="perf-baseline-${{ github.run_id }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
