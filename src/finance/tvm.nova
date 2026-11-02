@@ -19,7 +19,7 @@
 # by B * num gives an equation in integers only:
 #     pv * A * num  +  pmt * (A - B) * D  +  fv * B * num  =  0
 # pow() on ints is exact (Python's int ** int, builtin_pow,
-# Nova_Lang/novalang.py:2025-2029 at v2.0.0),
+# Nova_Lang/novalang.py:2028-2032 at v2.0.1),
 # so fv, pv and pmt are computed exactly and rounded half-up once, at the
 # end (money.round_half_up).
 #

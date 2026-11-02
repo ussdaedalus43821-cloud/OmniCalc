@@ -2,7 +2,7 @@
 
 NovaLang is vendored as a git submodule at vendor/Nova_Lang, pinned to
 PINNED_COMMIT. assert_pinned() is the startup check: the interpreter must
-report PINNED_VERSION (Nova_Lang/novalang.py:88, ``__version__``), and when
+report PINNED_VERSION (Nova_Lang/novalang.py:91, ``__version__``), and when
 the submodule is a git checkout its HEAD must be PINNED_COMMIT. Every entry
 point (the app, tools/run_tests.py) calls it before running any NovaLang.
 """
@@ -12,8 +12,8 @@ import shutil
 import subprocess
 import sys
 
-PINNED_VERSION = "2.0.0"
-PINNED_COMMIT = "bd5d502611fd5749046382b54fb9f91fc58d1e47"
+PINNED_VERSION = "2.0.1"
+PINNED_COMMIT = "2350a07be268c69555c082ad1ee6d9f1be0b8785"
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 NOVA_DIR = os.path.join(REPO_ROOT, "vendor", "Nova_Lang")
